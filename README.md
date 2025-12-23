@@ -4,6 +4,8 @@
 
 Keep your developer motivated, manage your energy levels, and earn coffee beans by staying productive!
 
+![DevGotchi Screenshot](screenshot.png)
+
 ---
 
 ## ✨ Key Features
