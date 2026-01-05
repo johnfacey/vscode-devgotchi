@@ -181,10 +181,11 @@ class DeveloperManager {
    * Action: Take a break to restore energy but lose some focus.
    */
   takeBreak() {
+    if (this.developer.energy == 100 && this.developer.motivation == 100) return { success: false, message: 'Energy and motivation are full!' };
+    this.addXP(Math.floor(Math.max(5, 5 * (100 - this.developer.energy) / 40, 5 * (100 - this.developer.motivation) / 15)));
     this.developer.energy = Math.min(100, this.developer.energy + 40);
     this.developer.motivation = Math.min(100, this.developer.motivation + 15);
     this.developer.focus = Math.max(0, this.developer.focus - 5);
-    this.addXP(5);
     this.saveDeveloper();
     return { success: true, message: 'Refreshed! 🌴' };
   }
@@ -219,7 +220,7 @@ class DeveloperManager {
     const coffeeEarned = Math.floor(score / 10);
     this.developer.coffee += coffeeEarned;
     this.developer.motivation = Math.min(100, this.developer.motivation + 20);
-    this.addXP(score);
+    this.addXP(score + score * score / 100 + score * score * score / 100000);
     this.saveDeveloper();
     return coffeeEarned;
   }
@@ -237,7 +238,7 @@ class DeveloperManager {
    * Adds XP and handles leveling up logic.
    */
   private addXP(amount: number) {
-    this.developer.xp += amount;
+    this.developer.xp += Math.floor(amount * (1 + this.developer.energy / 100) * (1 + this.developer.focus / 100) * (1 + this.developer.motivation / 100);
     const xpNeeded = this.developer.level * 100;
     if (this.developer.xp >= xpNeeded) {
       this.developer.level++;
