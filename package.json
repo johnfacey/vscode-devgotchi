@@ -2,7 +2,7 @@
   "name": "vscode-devgotchi",
   "displayName": "DevGotchi - Your Virtual Developer",
   "description": "A virtual programmer companion that grows and levels up as you code",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -12,6 +12,8 @@
   "activationEvents": [
     "onStartupFinished"
   ],
+  "icon": "icon.png",
+  "publisher": "johnfacey",
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -21,11 +23,19 @@
         "category": "DevGotchi"
       }
     ]
-  },
+  }, "maintainers": [
+    "John Facey"
+  ],
     "repository": {
     "type": "git",
     "url": "https://github.com/johnfacey/vscode-devgotchi.git"
   },
+    "keywords": [
+    "tamogotchi",
+    "code",
+    "motivational",
+    "game"
+  ],
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
