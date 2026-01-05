@@ -41,7 +41,8 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
-    "lint": "eslint src --ext ts"
+    "lint": "eslint src --ext ts",
+    "package": "npx vsce package"
   },
   "devDependencies": {
     "@types/vscode": "^1.80.0",
