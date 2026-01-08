@@ -19,6 +19,13 @@ Keep your developer motivated, manage your energy levels, and earn coffee beans 
 * **The Coffee Economy:** Earn **Coffee Beans** automatically every time you save a file or win challenges. Use them to "recharge" your developer.
 * **RPG Leveling System:** Gain XP and level up as you code. Watch your developer grow from a Junior to a Lead.
 * **Status Bar Integration:** A quick-glance overview of your level, mood, and health directly in the VS Code status bar.
+* **Git Integration:** Earn XP and rewards for commits, merges, and pull requests.
+* **The Shop:** Spend Coffee Beans on avatar skins, office furniture, and accessories.
+* **Linter Sync:** Your developer's health reacts to real errors and warnings in your code.
+* **Skill Trees:** Unlock passive abilities (e.g., "Caffeine Tolerance") to boost your stats.
+* **Daily Login Bonus:** Log in every day to earn Coffee Beans and build your streak.
+* **Leaderboard:** Compare your level against rival developers.
+* **Night Mode:** Your avatar sleeps if you code late at night (10 PM - 6 AM).
 
 ---
 
@@ -28,12 +35,16 @@ Keep your developer motivated, manage your energy levels, and earn coffee beans 
 Simply code as you usually do! 
 * **Saving Files:** Grants Motivation and earns you `+1 ☕`.
 * **Time:** Your energy and focus will naturally decay over time, shifting your mood from **Productive** 🚀 to **Tired** 😴 or **Burnt Out** 🔥.
+* **Git Activity:** Commits grant XP. Merges restore massive Motivation!
 
 ### 2. Active Management
 Open the **DevGotchi Panel** to interact with your dev:
 * ☕ **Give Coffee:** Spend beans to instantly boost Energy and Focus.
 * 🌴 **Take a Break:** Restore Energy and Health (but watch your Focus dip!).
-* 🎯 **Challenges:** Play mini-games like **Bug Hunt** or **Memory Debug** to earn massive XP and Bean rewards.
+* 🎯 **Challenges:** Play mini-games like **Bug Hunt**, **Speed Test**, or **Boss Battle** to earn massive XP and Bean rewards.
+* ⚡ **Skill Tree:** Unlock passive abilities.
+* 🛍️ **Shop:** Buy skins and furniture.
+* 🏆 **Leaderboard:** Check your global ranking.
 
 ---
 
@@ -63,6 +74,7 @@ Your developer's mood changes based on your stats:
 * 😴 **Tired:** Very low energy.
 * 🔥 **Burnt Out:** Critical health levels.
 * ☕ **Caffeinated:** Recently had coffee!
+* 💤 **Sleeping:** It's late! Your developer is resting.
 
 ---
 
