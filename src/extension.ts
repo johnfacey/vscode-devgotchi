@@ -238,7 +238,7 @@ class DeveloperManager {
    * Adds XP and handles leveling up logic.
    */
   private addXP(amount: number) {
-    this.developer.xp += Math.floor(amount * (1 + this.developer.energy / 100) * (1 + this.developer.focus / 100) * (1 + this.developer.motivation / 100);
+    this.developer.xp += Math.floor(amount * (1 + this.developer.energy / 100) * (1 + this.developer.focus / 100) * (1 + this.developer.motivation / 100));
     const xpNeeded = this.developer.level * 100;
     if (this.developer.xp >= xpNeeded) {
       this.developer.level++;
