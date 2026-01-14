@@ -1168,7 +1168,7 @@ class DeveloperPanel {
           input.oninput = () => {
             if(input.value === code) {
               const timeTaken = Date.now() - startTime;
-              const score = Math.max(100 - Math.floor(timeTaken / 100), 20);
+              const score = Math.max(300 - Math.floor(Math.max(timeTaken / 100, 0)), 20);
               vscode.postMessage({ command: 'challenge-completed', score });
               setTimeout(() => backToMenu(), 1500);
             }
@@ -1223,7 +1223,7 @@ class DeveloperPanel {
               
               if (bossHp <= 0) {
                 clearInterval(interval);
-                score = 300 + (time * 5);
+                score = 100 + (time * 10);
                 area.innerHTML = '<h3>Victory! 🏆</h3><p>Bug Monster defeated!</p>';
                 vscode.postMessage({ command: 'challenge-completed', score });
                 setTimeout(() => backToMenu(), 2000);
