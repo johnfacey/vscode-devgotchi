@@ -2,7 +2,7 @@
   "name": "vscode-devgotchi",
   "displayName": "DevGotchi - Your Virtual Developer",
   "description": "A virtual programmer companion that grows and levels up as you code",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "engines": {
     "vscode": "^1.80.0"
   },

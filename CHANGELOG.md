@@ -2,9 +2,11 @@
 
 All notable changes to the "DevGotchi" extension will be documented in this file.
 
-## [1.1.0] - 2024-01-12
+## [1.1.1] - 2024-01-17
 
 ### Added
+- **Patched**:
+    - **XP Gain**: Change to the XP Gain.
 - **RPG Mechanics**:
     - **Leveling System**: Gain XP from coding activities to level up your developer.
     - **Dynamic Stats**: Track Health, Motivation, Focus, and Energy in real-time.
