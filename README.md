@@ -1,59 +1,103 @@
-# 👨‍💻 DevGotchi 
+# 👨‍💻 DevGotchi
 
-**DevGotchi** is a "Developer Tamagotchi" extension for Visual Studio Code. It turns your coding sessions into an RPG-like experience where your productivity, health, and focus are tracked in real-time through a digital developer avatar.
+**DevGotchi** turns your VS Code sessions into a cyberpunk RPG. Your productivity, focus, and mental health are tracked in real-time through a living developer avatar. Code to earn XP, manage your stats, survive burnout, and become a Legendary Dev.
 
-Keep your developer motivated, manage your energy levels, and earn coffee beans by staying productive!
+> *Code is a Martial Art.*
 
 ![DevGotchi Screenshot](screenshot.png)
 
 ---
 
-## ✨ Key Features
+## ✨ Features
 
-* **Live Developer Avatar:** A dedicated side panel featuring your personal developer who reacts to your coding habits.
-* **Dynamic Stats Tracking:** Monitor four core attributes that fluctuate based on your activity:
-    * 💪 **Health:** Your overall well-being.
-    * 🔥 **Motivation:** Boosted by saving files and completing tasks.
-    * 🧠 **Focus:** Affected by long sessions and complexity.
-    * ⚡ **Energy:** Depletes over time; requires breaks to refill.
-* **The Coffee Economy:** Earn **Coffee Beans** automatically every time you save a file or win challenges. Use them to "recharge" your developer.
-* **RPG Leveling System:** Gain XP and level up as you code. Watch your developer grow from a Junior to a Lead.
-* **Status Bar Integration:** A quick-glance overview of your level, mood, and health directly in the VS Code status bar.
-* **Git Integration:** Earn XP and rewards for commits, merges, and pull requests.
-* **The Shop:** Spend Coffee Beans on avatar skins, office furniture, and accessories.
-* **Linter Sync:** Your developer's health reacts to real errors and warnings in your code.
-* **Skill Trees:** Unlock passive abilities (e.g., "Caffeine Tolerance") to boost your stats.
-* **Daily Login Bonus:** Log in every day to earn Coffee Beans and build your streak.
-* **Leaderboard:** Compare your level against rival developers.
-* **Night Mode:** Your avatar sleeps if you code late at night (10 PM - 6 AM).
+### 🎮 Core RPG Loop
+- **Live Avatar** — Your developer reacts to your coding habits in a dedicated side panel.
+- **Four Stats** — Focus 🎯, Motivation ⭐, Energy ⚡, and Health 💪 decay over time and are boosted by activity.
+- **XP & Leveling** — Earn XP for saves, commits, and bug fixes. Level up from Junior to Legendary Dev.
+- **Coffee Economy** — Coffee Beans are your currency. Earn them by coding, spend them on upgrades.
+- **Mood System** — Your developer's mood shifts: 🚀 Productive → 😰 Stressed → 😴 Tired → 💀 Burnt Out.
 
----
+### ☠️ Burnout State
+When your health hits zero, **full burnout** kicks in:
+- The UI shifts red with a glitch overlay and a critical warning banner.
+- Most actions are locked — you can only **Take a Break** or **Drink Coffee** to recover.
+- Recovering from burnout earns you the **Back from the Edge** achievement.
 
-## 🎮 How to Play
+### 🏅 Achievements
+12 unlockable badges tracking your milestones:
 
-### 1. The Passive Loop
-Simply code as you usually do! 
-* **Saving Files:** Grants Motivation and earns you `+1 ☕`.
-* **Time:** Your energy and focus will naturally decay over time, shifting your mood from **Productive** 🚀 to **Tired** 😴 or **Burnt Out** 🔥.
-* **Git Activity:** Commits grant XP. Merges restore massive Motivation!
+| Badge | How to Earn |
+| :--- | :--- |
+| ⌨️ First Keystroke | Save your first file |
+| 🚀 Ship It | Make your first commit |
+| 🔥 Getting Warmed Up | Reach Level 5 |
+| 🧘 Code Monk | Reach Level 10 |
+| ⚡ Legendary Dev | Reach Level 25 |
+| 📅 Week Warrior | 7-day login streak |
+| 🏆 Iron Discipline | 30-day login streak |
+| 🐛 Exterminator | Fix 50 bugs total |
+| 📦 Commit Machine | Make 20 commits |
+| ☕ Caffeinated | Earn 500 coffee beans lifetime |
+| 💀 Back from the Edge | Recover from full burnout |
+| 📜 Quest Master | Complete quests 5 days in a row |
 
-### 2. Active Management
-Open the **DevGotchi Panel** to interact with your dev:
-* ☕ **Give Coffee:** Spend beans to instantly boost Energy and Focus.
-* 🌴 **Take a Break:** Restore Energy and Health (but watch your Focus dip!).
-* 🎯 **Challenges:** Play mini-games like **Bug Hunt**, **Speed Test**, or **Boss Battle** to earn massive XP and Bean rewards.
-* ⚡ **Skill Tree:** Unlock passive abilities.
-* 🛍️ **Shop:** Buy skins and furniture.
-* 🏆 **Leaderboard:** Check your global ranking.
+### ⚡ Random Events
+Every 30-second tick, there's a chance of a surprise event — good or bad:
+- *"Found a forgotten coffee stash! +20 beans"*
+- *"Production incident! −Energy −Motivation"*
+- *"Rubber duck debugging breakthrough! +Motivation"*
+- *"Git blame points at you. −Motivation"*
+- ...and more. Stay on your toes.
+
+### 📡 Activity Log
+A live scrollable feed inside the panel showing every recent XP gain, achievement unlock, random event, and level-up — colour-coded by type.
+
+### 🎵 Cyberpunk Music
+Procedurally synthesised ambient music generated entirely with the Web Audio API (no external files):
+- Driving kick & hi-hat pattern
+- Walking A-minor bass line
+- Pentatonic arpeggio with stereo movement
+- Slow-swelling pad chords every 2 bars
+- Sparse synth lead phrase every 4 bars
+
+Toggle it on/off with the **🎵 Music** button. Fades in and out smoothly.
+
+### 📜 Daily Quests
+Three randomised quests refresh each day:
+- Save files, push commits, fix bugs, or log coding time.
+- Completing all three awards a streak bonus that grows over consecutive days.
+
+### 🎯 Mini-Games (Challenges)
+| Game | Description |
+| :--- | :--- |
+| 🐛 Bug Hunt | Click bugs before they vanish — 20 second frenzy |
+| ⚡ Speed Test | Type a code snippet as fast as possible |
+| 👾 Boss Battle | Type snippets to deal damage before time runs out |
+
+### ⚡ Skill Tree
+Unlock passive abilities with Coffee Beans:
+- **Caffeine Tolerance** — Coffee restores 50% more energy
+- **Iron Focus** — Focus decays 30% slower
+- **Bug Slayer** — Earn 2× XP when fixing bugs
+
+### 🛍️ Shop
+Spend beans on skins and gear that affect your stats:
+- Business Suit 🕴️, Space Suit 👨‍🚀
+- Ergo Chair (energy decays slower), Mech Keyboard (motivation decays slower)
+
+### 🔗 IDE Integrations
+- **Status Bar** — Level, mood emoji, and stat summary always visible.
+- **Git** — Commits award +50 XP and +5 beans automatically.
+- **Linter** — Fixing errors awards XP; active errors slowly drain your stats.
 
 ---
 
 ## 🚀 Getting Started
 
-1.  Install the extension.
-2.  Open the Command Palette (`Ctrl+Shift+P` or `Cmd+Shift+P`).
-3.  Run **"DevGotchi: Open Panel"**.
-4.  Your developer will appear in the secondary side column.
+1. Install the extension.
+2. Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`).
+3. Run **"DevGotchi: Open Panel"**.
+4. Your developer appears in the side column. A tutorial walks you through each feature.
 
 ---
 
@@ -61,21 +105,33 @@ Open the **DevGotchi Panel** to interact with your dev:
 
 | Command | Description |
 | :--- | :--- |
-| `DevGotchi: Open Panel` | Opens the main interaction dashboard. |
-| `devgotchi.openPanel` | (Internal) Command bound to the status bar item. |
+| `DevGotchi: Open Panel` | Opens the main dashboard |
+| `DevGotchi: Reset Progress` | Wipe all progress and start fresh |
 
 ---
 
-## 🎨 Interface Moods
+## 🎨 Panel Layout
 
-Your developer's mood changes based on your stats:
-* 🚀 **Productive:** High motivation and focus.
-* 😰 **Stressed:** Low focus or energy.
-* 😴 **Tired:** Very low energy.
-* 🔥 **Burnt Out:** Critical health levels.
-* ☕ **Caffeinated:** Recently had coffee!
-* 💤 **Sleeping:** It's late! Your developer is resting.
+```
+┌─────────────────────────────────────┐
+│  Avatar │ Name · Role               │
+│         │ LEVEL N  ████░░ XP        │
+│         │ ☕ Beans   🔥 Streak      │
+├─────────────────────────────────────┤
+│ ◈ Stats                             │
+│  🎯 Focus      ████████░░  82       │
+│  ⭐ Motivation ██████░░░░  65       │
+│  ⚡ Energy     ████░░░░░░  42       │
+│  💪 Health     ██████████  100      │
+├──────────────────┬──────────────────┤
+│ ◈ Active Quest  │ ☠ Burnout Boss   │
+│  Ship Something │  Overwhelmulus    │
+│  ████░░ 60%     │  ██████░░ 300 HP  │
+├─────────────────────────────────────┤
+│ ☕ 🎯 🌴 ⚡ 🛍️ 🏆 📜 🎵 🏅 📡    │
+└─────────────────────────────────────┘
+```
 
 ---
 
-**Happy Coding!** Keep your developer healthy and your coffee cup full. ☕
+**Happy Coding.** Keep your developer alive, your streak unbroken, and your coffee cup full. ☕
