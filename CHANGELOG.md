@@ -2,6 +2,27 @@
 
 All notable changes to the "DevGotchi" extension will be documented in this file.
 
+## [Unreleased]
+
+## [2.1.0] - 2026-07-06
+
+### Added
+- **Bug Boss**: the panel's boss card now reflects real active lint/build errors — HP is tied 1:1 to your actual error count (Syntax Wraith → NullPointerDemon → StackOverflow Behemoth → Overwhelmulus as errors pile up). Clearing every error defeats the boss for a bonus (+30 XP, +15 ☕). Falls back to the original health-based Burnout Boss when there are no active errors.
+- **Weekly Recap**: once every ~7 days, a notification summarizes what changed since the last one — XP earned, commits, bugs fixed, focus sprints completed, level progress, current streak. Stays silent for weeks with no activity.
+- **Focus Sprint (Pomodoro mode)**:
+    - Start a 15/25/50-minute timed sprint from the panel or Command Palette (`DevGotchi: Start Focus Sprint`).
+    - 1.5x XP multiplier and 50%-slower Focus decay while a sprint is active.
+    - Completion awards a bonus (+40 XP, +25 ☕); cancelling early forfeits it.
+    - Live countdown in the panel (new Focus Sprint card) and in the status bar.
+    - New command: `DevGotchi: Cancel Focus Sprint`.
+    - New **Deep Work** achievement (13th badge) for completing 10 Focus Sprints.
+- **Share Stats Card**: a new 📤 Share button (and `DevGotchi: Export Stats Card` command) opens a shareable stats card with two export options:
+    - **Copy as Markdown** — a paste-ready stats block for a GitHub README or PR description.
+    - **Save as Image** — a cyberpunk-styled PNG rendered client-side in the panel, saved wherever you choose.
+    - Fully local: the card is drawn from data already on your machine, nothing is sent anywhere except the file/text you explicitly export.
+- **Review prompt**: engaged users (3+ achievements or Level 5+) are asked once to rate DevGotchi on the Marketplace, with "Remind Me Later" / "Don't Ask Again" respected.
+- Refreshed Marketplace listing copy (description, keywords) and a new panel screenshot reflecting the 2.0 cyberpunk UI.
+
 ## [2.0.0] - 2026-06-08
 
 ### Added

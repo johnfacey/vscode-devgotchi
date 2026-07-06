@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as os from 'os';
 
 const SKILLS = [
   { id: 'caffeine_tolerance', name: 'Caffeine Tolerance', description: 'Coffee restores 50% more energy', cost: 50 },
@@ -50,6 +52,7 @@ const ACHIEVEMENTS: Achievement[] = [
   { id: 'coffee_500',    name: 'Caffeinated',        icon: '☕',  description: 'Earn 500 coffee beans total' },
   { id: 'survived_burnout', name: 'Back from the Edge', icon: '💀', description: 'Recover from full burnout' },
   { id: 'quest_streak_5', name: 'Quest Master',     icon: '📜',  description: 'Complete quests 5 days in a row' },
+  { id: 'focus_sprints_10', name: 'Deep Work',      icon: '⏱️',  description: 'Complete 10 Focus Sprints' },
 ];
 
 /**
@@ -82,7 +85,30 @@ interface ProgrammerStats {
   totalBugsFixed?: number;    // Lifetime bugs fixed counter
   totalCommits?: number;      // Lifetime commits counter
   totalCoffeeEarned?: number; // Lifetime coffee earned counter
+  focusSprintEndsAt?: number; // Timestamp the active Focus Sprint ends at (0 = none active)
+  focusSprintMinutes?: number; // Duration of the active/last Focus Sprint, for display
+  totalFocusSprintsCompleted?: number; // Lifetime completed Focus Sprints (for the Deep Work achievement)
+  activeErrorCount?: number;  // Live count of active lint/build errors, drives the Bug Boss card
+  totalXpEarned?: number;     // Lifetime XP earned (never decreases on level-up, unlike `xp`)
+  lastWeeklyRecapAt?: number; // Timestamp of the last weekly recap notification
+  weeklyRecapSnapshot?: WeeklyRecapSnapshot; // Stat snapshot the next recap will diff against
 }
+
+interface WeeklyRecapSnapshot {
+  level: number;
+  totalXpEarned: number;
+  totalCommits: number;
+  totalBugsFixed: number;
+  totalCoffeeEarned: number;
+  totalFocusSprintsCompleted: number;
+}
+
+const FOCUS_SPRINT_XP_MULTIPLIER = 1.5;
+const FOCUS_SPRINT_BONUS_XP = 40;
+const FOCUS_SPRINT_BONUS_COFFEE = 25;
+const BUG_BOSS_DEFEAT_BONUS_XP = 30;
+const BUG_BOSS_DEFEAT_BONUS_COFFEE = 15;
+const WEEKLY_RECAP_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Extension activation entry point.
@@ -105,21 +131,27 @@ export function activate(context: vscode.ExtensionContext) {
   const updateStatusBar = () => {
     const dev = devManager.getDeveloper();
     const emoji = getMoodEmoji(dev.mood);
-    statusBarItem.text = `${emoji} ${dev.name} Lv${dev.level}`;
-    statusBarItem.tooltip = `💪 ${Math.round(dev.health)}% | 🔥 ${Math.round(dev.motivation)}% | 🧠 ${Math.round(dev.focus)}% | ☕ ${dev.coffee}`;
+    let text = `${emoji} ${dev.name} Lv${dev.level}`;
+    const remaining = (dev.focusSprintEndsAt || 0) - Date.now();
+    if (remaining > 0) {
+      text += ` ⏱ ${formatMMSS(remaining)}`;
+    }
+    statusBarItem.text = text;
+    statusBarItem.tooltip = `💪 ${Math.round(dev.health)}% | 🔥 ${Math.round(dev.motivation)}% | 🧠 ${Math.round(dev.focus)}% | ☕ ${dev.coffee}`
+      + (remaining > 0 ? `\n⏱ Focus Sprint: ${formatMMSS(remaining)} left (${FOCUS_SPRINT_XP_MULTIPLIER}x XP)` : '');
     statusBarItem.show();
   };
-  
+
   // Initial status bar update
   updateStatusBar();
-  
+
   // Register the command to open the main webview panel
   context.subscriptions.push(
     vscode.commands.registerCommand('devgotchi.openPanel', () => {
       DeveloperPanel.createOrShow(context.extensionUri, devManager);
     })
   );
-  
+
   // Register command to reset progress
   context.subscriptions.push(
     vscode.commands.registerCommand('devgotchi.resetProgress', async () => {
@@ -127,7 +159,68 @@ export function activate(context: vscode.ExtensionContext) {
       DeveloperPanel.currentPanel?.updateDeveloper();
     })
   );
-  
+
+  // Register Focus Sprint commands (Pomodoro-style timed XP boost)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('devgotchi.startFocusSprint', async () => {
+      if (devManager.isFocusSprintActive()) {
+        const dev = devManager.getDeveloper();
+        const remaining = (dev.focusSprintEndsAt || 0) - Date.now();
+        const choice = await vscode.window.showInformationMessage(
+          `A Focus Sprint is already running (${formatMMSS(Math.max(0, remaining))} left).`,
+          'Cancel Sprint'
+        );
+        if (choice === 'Cancel Sprint') {
+          const result = devManager.cancelFocusSprint();
+          vscode.window.showInformationMessage(result.message);
+          updateStatusBar();
+          DeveloperPanel.currentPanel?.updateDeveloper();
+        }
+        return;
+      }
+      const pick = await vscode.window.showQuickPick(
+        [
+          { label: '15 min — Quick Sprint', minutes: 15 },
+          { label: '25 min — Classic Pomodoro', minutes: 25 },
+          { label: '50 min — Deep Work', minutes: 50 }
+        ],
+        { placeHolder: `Start a Focus Sprint (${FOCUS_SPRINT_XP_MULTIPLIER}x XP while it runs)` }
+      );
+      if (!pick) return;
+      const result = devManager.startFocusSprint(pick.minutes);
+      vscode.window.showInformationMessage(result.message);
+      updateStatusBar();
+      DeveloperPanel.currentPanel?.updateDeveloper();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('devgotchi.cancelFocusSprint', () => {
+      const result = devManager.cancelFocusSprint();
+      vscode.window.showInformationMessage(result.message);
+      updateStatusBar();
+      DeveloperPanel.currentPanel?.updateDeveloper();
+    })
+  );
+
+  // Register command to export a shareable stats card
+  context.subscriptions.push(
+    vscode.commands.registerCommand('devgotchi.exportStatsCard', () => {
+      DeveloperPanel.createOrShow(context.extensionUri, devManager);
+      DeveloperPanel.currentPanel?.openShareCard();
+    })
+  );
+
+  // Lightweight 1-second ticker purely for a smooth Focus Sprint countdown in
+  // the status bar / panel — does not run game logic (that stays on the 30s loop).
+  const focusTickInterval = setInterval(() => {
+    if (devManager.isFocusSprintActive()) {
+      updateStatusBar();
+      DeveloperPanel.currentPanel?.updateDeveloper();
+    }
+  }, 1000);
+  context.subscriptions.push({ dispose: () => clearInterval(focusTickInterval) });
+
   // Listen for file saves to reward the user
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(() => {
@@ -200,6 +293,16 @@ function getMoodEmoji(mood: string): string {
 }
 
 /**
+ * Formats a millisecond duration as MM:SS for the Focus Sprint countdown.
+ */
+function formatMMSS(ms: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/**
  * Manages the state and logic of the developer avatar.
  * Handles persistence, stat calculations, and game mechanics.
  */
@@ -235,6 +338,22 @@ class DeveloperManager {
       if (saved.totalBugsFixed === undefined) saved.totalBugsFixed = 0;
       if (saved.totalCommits === undefined) saved.totalCommits = 0;
       if (saved.totalCoffeeEarned === undefined) saved.totalCoffeeEarned = 0;
+      if (saved.focusSprintEndsAt === undefined) saved.focusSprintEndsAt = 0;
+      if (saved.focusSprintMinutes === undefined) saved.focusSprintMinutes = 0;
+      if (saved.totalFocusSprintsCompleted === undefined) saved.totalFocusSprintsCompleted = 0;
+      if (saved.activeErrorCount === undefined) saved.activeErrorCount = 0;
+      if (saved.totalXpEarned === undefined) saved.totalXpEarned = 0;
+      if (saved.lastWeeklyRecapAt === undefined) saved.lastWeeklyRecapAt = Date.now();
+      if (saved.weeklyRecapSnapshot === undefined) {
+        saved.weeklyRecapSnapshot = {
+          level: saved.level,
+          totalXpEarned: saved.totalXpEarned,
+          totalCommits: saved.totalCommits || 0,
+          totalBugsFixed: saved.totalBugsFixed || 0,
+          totalCoffeeEarned: saved.totalCoffeeEarned || 0,
+          totalFocusSprintsCompleted: saved.totalFocusSprintsCompleted || 0
+        };
+      }
       return saved;
     }
     return {
@@ -262,10 +381,24 @@ class DeveloperManager {
       isBurntOut: false,
       totalBugsFixed: 0,
       totalCommits: 0,
-      totalCoffeeEarned: 0
+      totalCoffeeEarned: 0,
+      focusSprintEndsAt: 0,
+      focusSprintMinutes: 0,
+      totalFocusSprintsCompleted: 0,
+      activeErrorCount: 0,
+      totalXpEarned: 0,
+      lastWeeklyRecapAt: Date.now(),
+      weeklyRecapSnapshot: {
+        level: 1,
+        totalXpEarned: 0,
+        totalCommits: 0,
+        totalBugsFixed: 0,
+        totalCoffeeEarned: 0,
+        totalFocusSprintsCompleted: 0
+      }
     };
   }
-  
+
   /**
    * Persists the current state to global storage.
    */
@@ -309,6 +442,52 @@ class DeveloperManager {
     if (this.developer.totalCommits! >= 20)                 unlock('commits_20');
     if (this.developer.totalCoffeeEarned! >= 500)           unlock('coffee_500');
     if ((this.developer.questStreak || 0) >= 5)             unlock('quest_streak_5');
+    if ((this.developer.totalFocusSprintsCompleted || 0) >= 10) unlock('focus_sprints_10');
+
+    this.maybeShowReviewPrompt();
+  }
+
+  /**
+   * Shows a one-time (periodically-reminded) prompt asking engaged users to
+   * rate DevGotchi on the Marketplace. Only fires once the user has some real
+   * investment in the extension (3+ achievements or level 5+), and respects
+   * "Remind Me Later" / "Don't Ask Again" so it never turns into nagging.
+   */
+  private maybeShowReviewPrompt() {
+    const state = this.context.globalState.get<{ dismissedForever?: boolean; remindAfter?: number }>('reviewPromptState', {});
+    if (state.dismissedForever) return;
+    if (state.remindAfter && Date.now() < state.remindAfter) return;
+
+    const isEngaged = this.developer.achievements.length >= 3 || this.developer.level >= 5;
+    if (!isEngaged) return;
+
+    const RATE = '⭐ Rate DevGotchi';
+    const LATER = 'Remind Me Later';
+    const NEVER = "Don't Ask Again";
+
+    vscode.window
+      .showInformationMessage(
+        `Enjoying DevGotchi, ${this.developer.name}? A quick rating helps other devs discover it. 🙏`,
+        RATE, LATER, NEVER
+      )
+      .then((choice) => {
+        if (choice === RATE) {
+          vscode.env.openExternal(
+            vscode.Uri.parse(
+              'https://marketplace.visualstudio.com/items?itemName=johnfacey.vscode-devgotchi&ssr=false#review-details'
+            )
+          );
+          this.context.globalState.update('reviewPromptState', { dismissedForever: true });
+        } else if (choice === NEVER) {
+          this.context.globalState.update('reviewPromptState', { dismissedForever: true });
+        } else if (choice === LATER) {
+          // Ask again in 2 weeks.
+          this.context.globalState.update('reviewPromptState', { remindAfter: Date.now() + 1000 * 60 * 60 * 24 * 14 });
+        } else {
+          // Dismissed via Escape/click-away — don't nag again tomorrow, but don't give up either.
+          this.context.globalState.update('reviewPromptState', { remindAfter: Date.now() + 1000 * 60 * 60 * 24 * 3 });
+        }
+      });
   }
 
   /**
@@ -369,7 +548,8 @@ class DeveloperManager {
     this.developer.energy = Math.max(0, this.developer.energy - hoursPassed * energyDecay);
     this.developer.motivation = Math.max(0, this.developer.motivation - hoursPassed * motivationDecay);
     
-    const focusDecay = this.developer.skills.includes('iron_focus') ? 2.1 : 3; // 30% slower
+    let focusDecay = this.developer.skills.includes('iron_focus') ? 2.1 : 3; // 30% slower
+    if (this.isFocusSprintActive()) focusDecay *= 0.5; // Deep work protects your Focus stat
     this.developer.focus = Math.max(0, this.developer.focus - hoursPassed * focusDecay);
     
     // Linter Stress: Active errors drain energy and motivation over time
@@ -391,10 +571,113 @@ class DeveloperManager {
     this.developer.lastUpdated = now;
     this.checkBurnout();
     this.maybeRandomEvent();
+    this.checkFocusSprintCompletion();
     this.checkAchievements();
+    this.checkWeeklyRecap();
     this.saveDeveloper();
   }
-  
+
+  /**
+   * Once every ~7 days, surfaces a friendly recap of what changed since the
+   * last one (XP, commits, bugs fixed, sprints, level). Snapshots are stored
+   * so the numbers always reflect genuinely new activity, not lifetime totals.
+   */
+  private checkWeeklyRecap() {
+    const last = this.developer.lastWeeklyRecapAt || 0;
+    if (Date.now() - last < WEEKLY_RECAP_INTERVAL_MS) return;
+
+    const prev: WeeklyRecapSnapshot = this.developer.weeklyRecapSnapshot || {
+      level: 1, totalXpEarned: 0, totalCommits: 0, totalBugsFixed: 0, totalCoffeeEarned: 0, totalFocusSprintsCompleted: 0
+    };
+
+    const xpGained = Math.max(0, (this.developer.totalXpEarned || 0) - prev.totalXpEarned);
+    const commitsGained = Math.max(0, (this.developer.totalCommits || 0) - prev.totalCommits);
+    const bugsGained = Math.max(0, (this.developer.totalBugsFixed || 0) - prev.totalBugsFixed);
+    const sprintsGained = Math.max(0, (this.developer.totalFocusSprintsCompleted || 0) - prev.totalFocusSprintsCompleted);
+    const levelsGained = this.developer.level - prev.level;
+    const hadActivity = xpGained > 0 || commitsGained > 0 || bugsGained > 0 || sprintsGained > 0;
+
+    if (hadActivity) {
+      const parts: string[] = [];
+      if (levelsGained > 0) parts.push(`Level ${prev.level} → ${this.developer.level}`);
+      parts.push(`+${xpGained} XP`);
+      if (commitsGained > 0) parts.push(`${commitsGained} commit${commitsGained === 1 ? '' : 's'}`);
+      if (bugsGained > 0) parts.push(`${bugsGained} bug${bugsGained === 1 ? '' : 's'} fixed`);
+      if (sprintsGained > 0) parts.push(`${sprintsGained} focus sprint${sprintsGained === 1 ? '' : 's'}`);
+      parts.push(`🔥 ${this.developer.streak || 0}-day streak`);
+
+      const summary = parts.join(' · ');
+      this.addLog(`📊 Weekly recap: ${summary}`, 'event');
+      vscode.window.showInformationMessage(`📊 Your week with ${this.developer.name}: ${summary}`);
+    }
+
+    // Reset the snapshot regardless of activity, so next week measures a fresh delta.
+    this.developer.lastWeeklyRecapAt = Date.now();
+    this.developer.weeklyRecapSnapshot = {
+      level: this.developer.level,
+      totalXpEarned: this.developer.totalXpEarned || 0,
+      totalCommits: this.developer.totalCommits || 0,
+      totalBugsFixed: this.developer.totalBugsFixed || 0,
+      totalCoffeeEarned: this.developer.totalCoffeeEarned || 0,
+      totalFocusSprintsCompleted: this.developer.totalFocusSprintsCompleted || 0
+    };
+  }
+
+  /**
+   * Whether a Focus Sprint is currently running.
+   */
+  isFocusSprintActive(): boolean {
+    return !!this.developer.focusSprintEndsAt && this.developer.focusSprintEndsAt > Date.now();
+  }
+
+  /**
+   * Starts a timed Focus Sprint. While active, XP earned is multiplied and
+   * the Focus stat decays more slowly. Only one sprint can run at a time.
+   */
+  startFocusSprint(minutes: number): { success: boolean; message: string } {
+    if (this.isFocusSprintActive()) {
+      return { success: false, message: 'A Focus Sprint is already in progress.' };
+    }
+    this.developer.focusSprintEndsAt = Date.now() + minutes * 60 * 1000;
+    this.developer.focusSprintMinutes = minutes;
+    this.addLog(`⏱️ Focus Sprint started (${minutes} min) — ${FOCUS_SPRINT_XP_MULTIPLIER}x XP`, 'event');
+    this.saveDeveloper();
+    return { success: true, message: `Focus Sprint started! ${minutes} minutes of ${FOCUS_SPRINT_XP_MULTIPLIER}x XP.` };
+  }
+
+  /**
+   * Cancels an in-progress Focus Sprint early. No completion bonus is awarded —
+   * that's the incentive to see it through, same as a real Pomodoro timer.
+   */
+  cancelFocusSprint(): { success: boolean; message: string } {
+    if (!this.isFocusSprintActive()) {
+      return { success: false, message: 'No Focus Sprint is currently running.' };
+    }
+    this.developer.focusSprintEndsAt = 0;
+    this.addLog('⏱️ Focus Sprint cancelled early.', 'event');
+    this.saveDeveloper();
+    return { success: true, message: 'Focus Sprint cancelled.' };
+  }
+
+  /**
+   * Checks whether an active sprint has just finished and, if so, awards the
+   * completion bonus exactly once.
+   */
+  private checkFocusSprintCompletion() {
+    const endsAt = this.developer.focusSprintEndsAt || 0;
+    if (endsAt > 0 && Date.now() >= endsAt) {
+      this.developer.focusSprintEndsAt = 0;
+      this.developer.coffee += FOCUS_SPRINT_BONUS_COFFEE;
+      this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + FOCUS_SPRINT_BONUS_COFFEE;
+      this.developer.totalFocusSprintsCompleted = (this.developer.totalFocusSprintsCompleted || 0) + 1;
+      this.addXP(FOCUS_SPRINT_BONUS_XP);
+      this.addLog(`🎯 Focus Sprint complete! +${FOCUS_SPRINT_BONUS_XP} XP, +${FOCUS_SPRINT_BONUS_COFFEE} ☕`, 'achievement');
+      vscode.window.showInformationMessage(
+        `🎯 Focus Sprint complete! +${FOCUS_SPRINT_BONUS_XP} XP, +${FOCUS_SPRINT_BONUS_COFFEE} ☕ — nice focus.`
+      );
+    }
+  }
+
   /**
    * Determines the current mood based on stat thresholds.
    */
@@ -505,7 +788,21 @@ class DeveloperManager {
         isBurntOut: false,
         totalBugsFixed: 0,
         totalCommits: 0,
-        totalCoffeeEarned: 0
+        totalCoffeeEarned: 0,
+        focusSprintEndsAt: 0,
+        focusSprintMinutes: 0,
+        totalFocusSprintsCompleted: 0,
+        activeErrorCount: 0,
+        totalXpEarned: 0,
+        lastWeeklyRecapAt: Date.now(),
+        weeklyRecapSnapshot: {
+          level: 1,
+          totalXpEarned: 0,
+          totalCommits: 0,
+          totalBugsFixed: 0,
+          totalCoffeeEarned: 0,
+          totalFocusSprintsCompleted: 0
+        }
       };
       this.saveDeveloper();
       this.updateStats();
@@ -578,11 +875,18 @@ class DeveloperManager {
 
   setInitialErrorCount(count: number) {
     this.lastErrorCount = count;
+    this.developer.activeErrorCount = count;
   }
 
+  /**
+   * Live "Bug Boss" HP is just the real active error count — this is called
+   * on every diagnostics change so the panel always reflects reality, not a
+   * simulated fight.
+   */
   updateErrorCount(currentErrors: number) {
     const diff = currentErrors - this.lastErrorCount;
-    
+    const previousErrors = this.lastErrorCount;
+
     if (diff < 0) {
       // Fixed bugs
       const fixed = Math.abs(diff);
@@ -594,12 +898,24 @@ class DeveloperManager {
       this.updateQuestProgress('fix', fixed);
       this.checkAchievements();
       vscode.window.setStatusBarMessage(`Bug squashed! +${fixed * 5 * xpMult} XP 🐛`, 3000);
+
+      // Bug Boss defeated: every active error just got cleared.
+      if (currentErrors === 0 && previousErrors > 0) {
+        this.addXP(BUG_BOSS_DEFEAT_BONUS_XP);
+        this.developer.coffee += BUG_BOSS_DEFEAT_BONUS_COFFEE;
+        this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + BUG_BOSS_DEFEAT_BONUS_COFFEE;
+        this.addLog(`👾 Bug Boss defeated! +${BUG_BOSS_DEFEAT_BONUS_XP} XP, +${BUG_BOSS_DEFEAT_BONUS_COFFEE} ☕`, 'achievement');
+        vscode.window.showInformationMessage(
+          `👾 Bug Boss defeated! +${BUG_BOSS_DEFEAT_BONUS_XP} XP, +${BUG_BOSS_DEFEAT_BONUS_COFFEE} ☕ — your code is clean.`
+        );
+      }
     } else if (diff > 0) {
       // New bugs introduced - slight focus hit
       this.developer.focus = Math.max(0, this.developer.focus - (diff * 0.5));
     }
-    
+
     this.lastErrorCount = currentErrors;
+    this.developer.activeErrorCount = currentErrors;
     this.saveDeveloper();
   }
 
@@ -714,8 +1030,11 @@ class DeveloperManager {
    * Adds XP and handles leveling up logic.
    */
   private addXP(amount: number) {
-    this.developer.xp += Math.floor(amount * (1 + this.developer.energy / 100) * (1 + this.developer.focus / 100) * (1 + this.developer.motivation / 100));
-    
+    const sprintMultiplier = this.isFocusSprintActive() ? FOCUS_SPRINT_XP_MULTIPLIER : 1;
+    const gained = Math.floor(amount * (1 + this.developer.energy / 100) * (1 + this.developer.focus / 100) * (1 + this.developer.motivation / 100) * sprintMultiplier);
+    this.developer.xp += gained;
+    this.developer.totalXpEarned = (this.developer.totalXpEarned || 0) + gained;
+
     let leveledUp = false;
     let xpNeeded = this.developer.level * 100;
     
@@ -775,9 +1094,42 @@ class DeveloperPanel {
           this.updateDeveloper();
           break;
         case 'complete-tutorial': this.devManager.completeTutorial(); break;
+        case 'start-focus-sprint': this.updatePanel(this.devManager.startFocusSprint(message.minutes)); break;
+        case 'cancel-focus-sprint': this.updatePanel(this.devManager.cancelFocusSprint()); break;
+        case 'copy-text':
+          vscode.env.clipboard.writeText(message.text);
+          this.panel.webview.postMessage({ command: 'action-result', result: { message: '📋 Copied! Paste it into your README or a post.' } });
+          break;
+        case 'save-stats-image':
+          this.saveStatsImage(message.dataUrl, message.suggestedName);
+          break;
       }
     }, null, this.disposables);
     this.updateDeveloper();
+  }
+
+  /**
+   * Decodes a data-URL PNG from the webview canvas and saves it to disk,
+   * offering to reveal it in the OS file browser afterward.
+   */
+  private async saveStatsImage(dataUrl: string, suggestedName: string) {
+    try {
+      const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+      const buffer = Buffer.from(base64, 'base64');
+      const defaultUri = vscode.Uri.file(path.join(os.homedir(), suggestedName || 'devgotchi-stats.png'));
+      const target = await vscode.window.showSaveDialog({
+        defaultUri,
+        filters: { 'PNG Image': ['png'] }
+      });
+      if (!target) return;
+      await vscode.workspace.fs.writeFile(target, buffer);
+      const choice = await vscode.window.showInformationMessage('🖼️ Stats card saved!', 'Reveal in Folder');
+      if (choice === 'Reveal in Folder') {
+        vscode.commands.executeCommand('revealFileInOS', target);
+      }
+    } catch (err) {
+      vscode.window.showErrorMessage('Failed to save the stats card image.');
+    }
   }
 
   /**
@@ -793,6 +1145,14 @@ class DeveloperPanel {
    */
   public updateDeveloper() {
     this.panel.webview.postMessage({ command: 'update', developer: this.devManager.getDeveloper() });
+  }
+
+  /**
+   * Tells the webview to open the Share Stats Card modal (used by the
+   * "Export Stats Card" command palette entry).
+   */
+  public openShareCard() {
+    this.panel.webview.postMessage({ command: 'open-share-modal' });
   }
 
   /**
@@ -1067,6 +1427,70 @@ class DeveloperPanel {
       box-shadow: 0 0 8px var(--neon-red);
       transition: width 0.3s;
     }
+
+    /* Bug Boss mode — swaps in when there are real active lint/build errors */
+    #bossCard.bug-mode {
+      border-color: #4a3a10;
+      box-shadow: 0 0 10px rgba(255,215,64,0.1);
+    }
+    #bossCard.bug-mode .boss-title { color: var(--neon-gold); }
+    #bossCard.bug-mode .boss-name { color: #ffcf5c; }
+    #bossCard.bug-mode .boss-track { border-color: #4a3a10; }
+    #bossCard.bug-mode .boss-hp-fill {
+      background: linear-gradient(90deg, #7a5a00, var(--neon-gold));
+      box-shadow: 0 0 8px var(--neon-gold);
+    }
+
+    /* ── FOCUS SPRINT ── */
+    .focus-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 12px 14px;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .focus-desc { font-size: 10.5px; color: var(--text-dim); margin: 4px 0 10px; }
+    .focus-btn-row { display: flex; gap: 8px; }
+    .focus-len-btn {
+      flex: 1;
+      background: var(--bg-card);
+      border: 1px solid var(--neon-purple);
+      color: var(--text-main);
+      font-family: inherit;
+      font-size: 11px;
+      letter-spacing: 1px;
+      padding: 8px 4px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    .focus-len-btn:hover { box-shadow: 0 0 10px rgba(157,78,221,0.4); }
+    .focus-multiplier {
+      float: right;
+      font-size: 10px;
+      color: var(--neon-gold);
+      letter-spacing: 0.5px;
+    }
+    .focus-countdown {
+      font-size: 30px;
+      font-weight: bold;
+      color: var(--neon-purple);
+      text-shadow: 0 0 10px rgba(157,78,221,0.6);
+      margin: 6px 0 10px;
+      letter-spacing: 2px;
+    }
+    .focus-cancel-btn {
+      background: var(--bg-card);
+      border: 1px solid var(--neon-red);
+      color: #ff7070;
+      font-family: inherit;
+      font-size: 10.5px;
+      letter-spacing: 1px;
+      padding: 7px 14px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    .focus-cancel-btn:hover { box-shadow: 0 0 10px rgba(255,23,68,0.4); }
     .boss-hp-text { font-size: 10px; color: var(--text-dim); margin-top: 4px; text-align: right; }
 
     /* ── ACTION BUTTONS ── */
@@ -1257,6 +1681,15 @@ class DeveloperPanel {
       letter-spacing: 1px;
     }
     .modal-close-btn:hover { border-color: var(--neon-purple); color: var(--text-main); }
+
+    /* ── SHARE STATS CARD ── */
+    .share-canvas-wrap {
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      line-height: 0;
+    }
+    #shareCanvas { width: 100%; height: auto; display: block; }
 
     /* ── SKILL / SHOP ITEMS ── */
     .skill-item {
@@ -1506,11 +1939,29 @@ class DeveloperPanel {
             <div class="quest-track"><div id="activeQuestBar" class="quest-fill" style="width:0%"></div></div>
             <div class="quest-pct" id="activeQuestPct">—</div>
           </div>
-          <div class="mini-card">
-            <div class="boss-title">☠ Burnout Boss</div>
+          <div class="mini-card" id="bossCard">
+            <div class="boss-title" id="bossTitleDisplay">☠ Burnout Boss</div>
             <div class="boss-name" id="bossNameDisplay">Overwhelmulus</div>
             <div class="boss-track"><div id="bossHealthBar" class="boss-hp-fill" style="width:60%"></div></div>
             <div class="boss-hp-text" id="bossHealthText">300 / 500 HP</div>
+          </div>
+        </div>
+
+        <!-- ── FOCUS SPRINT (Pomodoro-style timed XP boost) ── -->
+        <div class="focus-card" id="focusCard">
+          <div id="focusInactive">
+            <div class="section-title">◈ Focus Sprint</div>
+            <div class="focus-desc">Run a timed sprint for 1.5x XP and slower Focus decay.</div>
+            <div class="focus-btn-row">
+              <button class="focus-len-btn" onclick="startFocusSprint(15)">15 MIN</button>
+              <button class="focus-len-btn" onclick="startFocusSprint(25)">25 MIN</button>
+              <button class="focus-len-btn" onclick="startFocusSprint(50)">50 MIN</button>
+            </div>
+          </div>
+          <div id="focusActive" style="display:none">
+            <div class="section-title">◈ Focus Sprint <span class="focus-multiplier">1.5x XP</span></div>
+            <div class="focus-countdown" id="focusCountdown">25:00</div>
+            <button class="focus-cancel-btn" onclick="cancelFocusSprint()">CANCEL SPRINT</button>
           </div>
         </div>
 
@@ -1545,6 +1996,9 @@ class DeveloperPanel {
           </button>
           <button id="btn-log" class="action-btn" onclick="toggleLog()" title="Activity Log">
             <div class="action-icon">📡</div><div class="action-label">Log</div>
+          </button>
+          <button id="btn-share" class="action-btn" onclick="showShareModal()" title="Share your stats">
+            <div class="action-icon">📤</div><div class="action-label">Share</div>
           </button>
         </div>
 
@@ -1630,6 +2084,21 @@ class DeveloperPanel {
         </div>
       </div>
 
+      <!-- ── SHARE STATS CARD MODAL ── -->
+      <div id="shareModal" class="modal">
+        <div class="modal-content" style="max-width:640px">
+          <h3>📤 Share Your Stats</h3>
+          <div class="share-canvas-wrap">
+            <canvas id="shareCanvas" width="1200" height="630"></canvas>
+          </div>
+          <div class="modal-buttons" style="margin-top:12px;">
+            <button onclick="copyStatsMarkdown()">📋 COPY AS MARKDOWN</button>
+            <button onclick="saveStatsImage()">🖼️ SAVE AS IMAGE</button>
+          </div>
+          <button class="modal-close-btn" onclick="closeShareModal()">CLOSE</button>
+        </div>
+      </div>
+
       <div id="tutorialOverlay" class="tutorial-overlay"></div>
       <div id="tutorialBox" class="tutorial-box">
         <h3 id="tutTitle">Welcome!</h3>
@@ -1649,6 +2118,27 @@ class DeveloperPanel {
         function buyItem(id) { vscode.postMessage({ command: 'buy-item', itemId: id }); }
         function equipItem(id) { vscode.postMessage({ command: 'equip-item', itemId: id }); }
         function toggleChallenges() { document.getElementById('challengeContainer').classList.toggle('active'); }
+
+        // ── FOCUS SPRINT (Pomodoro-style timed XP boost) ──
+        function startFocusSprint(minutes) { vscode.postMessage({ command: 'start-focus-sprint', minutes }); }
+        function cancelFocusSprint() { vscode.postMessage({ command: 'cancel-focus-sprint' }); }
+        function formatMMSS(ms) {
+          const total = Math.max(0, Math.ceil(ms / 1000));
+          const m = Math.floor(total / 60);
+          const s = total % 60;
+          return m + ':' + String(s).padStart(2, '0');
+        }
+        function updateFocusUI() {
+          if (!currentDev) return;
+          const remaining = (currentDev.focusSprintEndsAt || 0) - Date.now();
+          const active = remaining > 0;
+          document.getElementById('focusInactive').style.display = active ? 'none' : 'block';
+          document.getElementById('focusActive').style.display = active ? 'block' : 'none';
+          if (active) {
+            document.getElementById('focusCountdown').textContent = formatMMSS(remaining);
+          }
+        }
+        setInterval(updateFocusUI, 1000);
         
         function showRenameModal() {
           document.getElementById('renameModal').classList.add('active');
@@ -1848,6 +2338,7 @@ class DeveloperPanel {
           if (m.command === 'update') {
             const dev = m.developer;
             currentDev = dev;
+            updateFocusUI();
 
             // Stats
             document.getElementById('healthBar').style.width = Math.round(dev.health) + '%';
@@ -1888,11 +2379,30 @@ class DeveloperPanel {
               document.getElementById('activeQuestPct').textContent = '';
             }
 
-            // Burnout boss HP = derived from health (100 health = full boss, 0 health = boss dead)
-            const bossMaxHp = 500;
-            const bossHp = Math.round((dev.health / 100) * bossMaxHp);
-            document.getElementById('bossHealthBar').style.width = (dev.health) + '%';
-            document.getElementById('bossHealthText').textContent = bossHp + ' / ' + bossMaxHp + ' HP';
+            // Boss card: shows a real Bug Boss when there are active lint/build
+            // errors, otherwise falls back to the burnout-derived boss.
+            const bossCard = document.getElementById('bossCard');
+            const activeErrors = dev.activeErrorCount || 0;
+            if (activeErrors > 0) {
+              bossCard.classList.add('bug-mode');
+              document.getElementById('bossTitleDisplay').textContent = '🐛 Bug Boss';
+              let bossName = 'Syntax Wraith';
+              if (activeErrors >= 11) bossName = 'Overwhelmulus';
+              else if (activeErrors >= 6) bossName = 'StackOverflow Behemoth';
+              else if (activeErrors >= 3) bossName = 'NullPointerDemon';
+              document.getElementById('bossNameDisplay').textContent = bossName;
+              const bugPct = Math.min(100, activeErrors * 20);
+              document.getElementById('bossHealthBar').style.width = bugPct + '%';
+              document.getElementById('bossHealthText').textContent = activeErrors + ' error' + (activeErrors === 1 ? '' : 's') + ' remaining';
+            } else {
+              bossCard.classList.remove('bug-mode');
+              document.getElementById('bossTitleDisplay').textContent = '☠ Burnout Boss';
+              document.getElementById('bossNameDisplay').textContent = 'Overwhelmulus';
+              const bossMaxHp = 500;
+              const bossHp = Math.round((dev.health / 100) * bossMaxHp);
+              document.getElementById('bossHealthBar').style.width = (dev.health) + '%';
+              document.getElementById('bossHealthText').textContent = bossHp + ' / ' + bossMaxHp + ' HP';
+            }
 
             if(document.getElementById('skillsModal').classList.contains('active')) renderSkills();
             if(document.getElementById('shopModal').classList.contains('active')) renderShop();
@@ -1924,6 +2434,9 @@ class DeveloperPanel {
             n.textContent = m.result.message;
             document.body.appendChild(n);
             setTimeout(() => n.remove(), 3000);
+          }
+          if (m.command === 'open-share-modal') {
+            showShareModal();
           }
         });
 
@@ -2364,6 +2877,192 @@ class DeveloperPanel {
               (isEarned ? '<span style="color:var(--neon-gold);font-size:14px;">✓</span>' : '<span style="color:var(--text-dim);font-size:11px;">🔒</span>') +
             '</div>';
           });
+        }
+
+        // ── SHARE STATS CARD ────────────────────────────────────────────────
+        function getTitleForLevel(level) {
+          if (level >= 25) return 'Legendary Dev';
+          if (level >= 10) return 'Code Monk';
+          if (level >= 5) return 'Mid-Level Developer';
+          return 'Junior Developer';
+        }
+
+        function showShareModal() {
+          document.getElementById('shareModal').classList.add('active');
+          renderShareCard();
+        }
+        function closeShareModal() {
+          document.getElementById('shareModal').classList.remove('active');
+        }
+
+        function renderShareCard() {
+          if (!currentDev) return;
+          const dev = currentDev;
+          const canvas = document.getElementById('shareCanvas');
+          const ctx = canvas.getContext('2d');
+          const W = canvas.width, H = canvas.height;
+
+          // Background
+          ctx.save();
+          roundRect(ctx, 0, 0, W, H, 18);
+          ctx.clip();
+          const bg = ctx.createLinearGradient(0, 0, W, H);
+          bg.addColorStop(0, '#080812');
+          bg.addColorStop(1, '#12102a');
+          ctx.fillStyle = bg;
+          ctx.fillRect(0, 0, W, H);
+          // Ambient corner glows
+          const glow1 = ctx.createRadialGradient(W*0.85, H*0.15, 0, W*0.85, H*0.15, 420);
+          glow1.addColorStop(0, 'rgba(157,78,221,0.22)'); glow1.addColorStop(1, 'rgba(157,78,221,0)');
+          ctx.fillStyle = glow1; ctx.fillRect(0, 0, W, H);
+          const glow2 = ctx.createRadialGradient(W*0.1, H*0.9, 0, W*0.1, H*0.9, 360);
+          glow2.addColorStop(0, 'rgba(224,64,251,0.14)'); glow2.addColorStop(1, 'rgba(224,64,251,0)');
+          ctx.fillStyle = glow2; ctx.fillRect(0, 0, W, H);
+          ctx.restore();
+
+          // Border
+          roundRect(ctx, 3, 3, W-6, H-6, 16);
+          ctx.strokeStyle = '#9d4edd';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+
+          // Header wordmark
+          ctx.textAlign = 'left';
+          ctx.fillStyle = '#e8e8ff';
+          ctx.font = 'bold 30px "Share Tech Mono", monospace';
+          ctx.fillText('DEVGOTCHI', 56, 78);
+          ctx.fillStyle = '#00e5ff';
+          ctx.font = '14px "Share Tech Mono", monospace';
+          ctx.fillText('CODE IS A MARTIAL ART', 58, 100);
+
+          // Mood badge (top right)
+          ctx.textAlign = 'right';
+          ctx.font = '46px sans-serif';
+          ctx.fillText(dev.mood === 'sleeping' ? '💤' : (dev.role || '👨‍💻'), W-56, 82);
+
+          // Dev name + title
+          ctx.textAlign = 'left';
+          ctx.fillStyle = '#7070a0';
+          ctx.font = '16px "Share Tech Mono", monospace';
+          ctx.fillText(getTitleForLevel(dev.level).toUpperCase(), 58, 158);
+          ctx.fillStyle = '#e8e8ff';
+          ctx.font = 'bold 44px "Share Tech Mono", monospace';
+          ctx.fillText(dev.name || 'Dev', 56, 206);
+
+          // Level badge
+          ctx.fillStyle = '#ffd740';
+          ctx.font = 'bold 22px "Share Tech Mono", monospace';
+          ctx.textAlign = 'right';
+          ctx.fillText('LEVEL ' + dev.level, W-56, 158);
+
+          // XP bar
+          const xpNeeded = dev.level * 100;
+          const xpPct = Math.max(0, Math.min(1, dev.xp / xpNeeded));
+          const barX = 56, barY = 226, barW = W - 112, barH = 14;
+          roundRect(ctx, barX, barY, barW, barH, 7);
+          ctx.fillStyle = '#1a1a30';
+          ctx.fill();
+          roundRect(ctx, barX, barY, Math.max(barH, barW * xpPct), barH, 7);
+          const xpGrad = ctx.createLinearGradient(barX, 0, barX+barW, 0);
+          xpGrad.addColorStop(0, '#9d4edd'); xpGrad.addColorStop(1, '#e040fb');
+          ctx.fillStyle = xpGrad;
+          ctx.fill();
+          ctx.textAlign = 'right';
+          ctx.fillStyle = '#7070a0';
+          ctx.font = '13px "Share Tech Mono", monospace';
+          ctx.fillText(dev.xp + ' / ' + xpNeeded + ' XP', W-56, barY + 32);
+
+          // Stat readout
+          const stats = [
+            ['FOCUS', Math.round(dev.focus), '#9d4edd'],
+            ['MOTIVATION', Math.round(dev.motivation), '#ffd740'],
+            ['ENERGY', Math.round(dev.energy), '#00e5ff'],
+            ['HEALTH', Math.round(dev.health), '#ff1744']
+          ];
+          const statY = 300;
+          const statColW = (W - 112) / 4;
+          stats.forEach((s, i) => {
+            const sx = 56 + i * statColW;
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#7070a0';
+            ctx.font = '11px "Share Tech Mono", monospace';
+            ctx.fillText(s[0], sx, statY);
+            ctx.fillStyle = s[2];
+            ctx.font = 'bold 26px "Share Tech Mono", monospace';
+            ctx.fillText(String(s[1]), sx, statY + 32);
+          });
+
+          // Stat tiles row (lifetime stats)
+          const earned = (dev.achievements || []).length;
+          const totalAch = (typeof ALL_ACHIEVEMENTS !== 'undefined') ? ALL_ACHIEVEMENTS.length : earned;
+          const tiles = [
+            ['🔥', (dev.streak || 0) + 'd', 'STREAK'],
+            ['☕', String(dev.totalCoffeeEarned || 0), 'BEANS EARNED'],
+            ['📦', String(dev.totalCommits || 0), 'COMMITS'],
+            ['⏱️', String(dev.totalFocusSprintsCompleted || 0), 'SPRINTS'],
+            ['🏅', earned + '/' + totalAch, 'AWARDS']
+          ];
+          const tileY = 380, tileH = 150;
+          const tileGap = 14;
+          const tileW = (W - 112 - tileGap * 4) / 5;
+          tiles.forEach((t, i) => {
+            const tx = 56 + i * (tileW + tileGap);
+            roundRect(ctx, tx, tileY, tileW, tileH, 8);
+            ctx.fillStyle = '#13132a';
+            ctx.fill();
+            ctx.strokeStyle = '#2a2a4a';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.textAlign = 'center';
+            ctx.font = '34px sans-serif';
+            ctx.fillText(t[0], tx + tileW/2, tileY + 52);
+            ctx.fillStyle = '#e8e8ff';
+            ctx.font = 'bold 24px "Share Tech Mono", monospace';
+            ctx.fillText(t[1], tx + tileW/2, tileY + 92);
+            ctx.fillStyle = '#7070a0';
+            ctx.font = '10px "Share Tech Mono", monospace';
+            ctx.fillText(t[2], tx + tileW/2, tileY + 118);
+          });
+
+          // Footer
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#5a5878';
+          ctx.font = '13px "Share Tech Mono", monospace';
+          ctx.fillText('Built with DevGotchi — a virtual developer for VS Code', W/2, H - 34);
+        }
+
+        function buildStatsMarkdown() {
+          const dev = currentDev;
+          const xpNeeded = dev.level * 100;
+          const earned = (dev.achievements || []).length;
+          const totalAch = (typeof ALL_ACHIEVEMENTS !== 'undefined') ? ALL_ACHIEVEMENTS.length : earned;
+          return [
+            '### 🕹️ DevGotchi Stats — ' + (dev.name || 'Dev'),
+            '',
+            '**Level ' + dev.level + '** (' + getTitleForLevel(dev.level) + ') · ' + dev.xp + ' / ' + xpNeeded + ' XP · 🔥 ' + (dev.streak || 0) + '-day streak',
+            '',
+            '| 🎯 Focus | ⭐ Motivation | ⚡ Energy | 💪 Health |',
+            '|:---:|:---:|:---:|:---:|',
+            '| ' + Math.round(dev.focus) + ' | ' + Math.round(dev.motivation) + ' | ' + Math.round(dev.energy) + ' | ' + Math.round(dev.health) + ' |',
+            '',
+            '☕ ' + (dev.totalCoffeeEarned || 0) + ' beans earned · 📦 ' + (dev.totalCommits || 0) + ' commits · ⏱️ ' + (dev.totalFocusSprintsCompleted || 0) + ' focus sprints · 🏅 ' + earned + '/' + totalAch + ' achievements',
+            '',
+            '*Code is a Martial Art.* — via [DevGotchi](https://marketplace.visualstudio.com/items?itemName=johnfacey.vscode-devgotchi)'
+          ].join('\\n');
+        }
+
+        function copyStatsMarkdown() {
+          if (!currentDev) return;
+          vscode.postMessage({ command: 'copy-text', text: buildStatsMarkdown() });
+        }
+
+        function saveStatsImage() {
+          if (!currentDev) return;
+          renderShareCard();
+          const canvas = document.getElementById('shareCanvas');
+          const dataUrl = canvas.toDataURL('image/png');
+          const safeName = (currentDev.name || 'dev').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+          vscode.postMessage({ command: 'save-stats-image', dataUrl, suggestedName: 'devgotchi-' + safeName + '.png' });
         }
 
         // ── ACTIVITY LOG ──────────────────────────────────────────────────

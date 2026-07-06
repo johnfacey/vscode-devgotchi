@@ -1,8 +1,8 @@
 {
   "name": "vscode-devgotchi",
   "displayName": "DevGotchi - Your Virtual Developer",
-  "description": "A virtual programmer companion that grows and levels up as you code",
-  "version": "2.0.0",
+  "description": "A cyberpunk RPG for your coding sessions. Level up, earn XP, and fight off burnout as a living developer avatar tracks your focus, energy, and motivation in real time.",
+  "version": "2.1.0",
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -21,6 +21,21 @@
         "command": "devgotchi.openPanel",
         "title": "Open Developer Panel",
         "category": "DevGotchi"
+      },
+      {
+        "command": "devgotchi.startFocusSprint",
+        "title": "Start Focus Sprint (Pomodoro)",
+        "category": "DevGotchi"
+      },
+      {
+        "command": "devgotchi.cancelFocusSprint",
+        "title": "Cancel Focus Sprint",
+        "category": "DevGotchi"
+      },
+      {
+        "command": "devgotchi.exportStatsCard",
+        "title": "Export Stats Card",
+        "category": "DevGotchi"
       }
     ]
   }, "maintainers": [
@@ -31,8 +46,15 @@
     "url": "https://github.com/johnfacey/vscode-devgotchi.git"
   },
     "keywords": [
+    "tamagotchi",
     "tamogotchi",
-    "code",
+    "gamification",
+    "productivity",
+    "rpg",
+    "focus",
+    "burnout",
+    "pomodoro",
+    "streak",
     "motivational",
     "game"
   ],
