@@ -1,0 +1,12 @@
+.vscode/**
+.git/**
+.gitignore
+src/**
+tsconfig.json
+package-lock.json
+**/*.map
+.eslintrc*
+node_modules/**
+*.vsix
+social-posts-*.md
+devgotchi_boss_fight.gif

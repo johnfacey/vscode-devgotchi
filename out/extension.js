@@ -5,6 +5,7 @@ exports.deactivate = deactivate;
 const vscode = require("vscode");
 const path = require("path");
 const os = require("os");
+const cp = require("child_process");
 const SKILLS = [
     { id: 'caffeine_tolerance', name: 'Caffeine Tolerance', description: 'Coffee restores 50% more energy', cost: 50 },
     { id: 'iron_focus', name: 'Iron Focus', description: 'Focus decays 30% slower', cost: 75 },
@@ -37,12 +38,46 @@ const FOCUS_SPRINT_BONUS_COFFEE = 25;
 const BUG_BOSS_DEFEAT_BONUS_XP = 30;
 const BUG_BOSS_DEFEAT_BONUS_COFFEE = 15;
 const WEEKLY_RECAP_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_SETTINGS = {
+    weeklyRecapEnabled: true,
+    reduceNotifications: false,
+    decayRate: 'normal'
+};
+const DECAY_RATE_MULTIPLIERS = {
+    relaxed: 0.5,
+    normal: 1,
+    intense: 1.5
+};
+/**
+ * Fills in any missing/invalid fields on a partial settings object with
+ * defaults. Used both for loading saved settings and for validating a
+ * settings object that arrived from the webview or an imported file.
+ */
+function mergeSettings(raw) {
+    const allowedDecayRates = ['relaxed', 'normal', 'intense'];
+    const decayRate = allowedDecayRates.includes(raw?.decayRate) ? raw.decayRate : DEFAULT_SETTINGS.decayRate;
+    return {
+        weeklyRecapEnabled: typeof raw?.weeklyRecapEnabled === 'boolean' ? raw.weeklyRecapEnabled : DEFAULT_SETTINGS.weeklyRecapEnabled,
+        reduceNotifications: typeof raw?.reduceNotifications === 'boolean' ? raw.reduceNotifications : DEFAULT_SETTINGS.reduceNotifications,
+        decayRate
+    };
+}
 /**
  * Extension activation entry point.
  * Initializes the game manager, status bar, and event listeners.
  */
 function activate(context) {
+    // Capture this BEFORE constructing DeveloperManager, which saves a fresh
+    // default state on first run — we need to know whether a save already
+    // existed to tell "brand new install" apart from "upgraded from an older
+    // version" for the What's New popup below.
+    const hadExistingSave = !!context.globalState.get('developer');
     const devManager = new DeveloperManager(context);
+    // Team Mode: wired up further down once/if a git repository is detected
+    // (see the Git Integration block). Declared here so every command closure
+    // above and below can reference the same instance once it exists.
+    let teamManager;
+    checkAndShowWhatsNew(context, hadExistingSave);
     // Create and configure the status bar item
     const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusBarItem.command = 'devgotchi.openPanel';
@@ -67,7 +102,7 @@ function activate(context) {
     updateStatusBar();
     // Register the command to open the main webview panel
     context.subscriptions.push(vscode.commands.registerCommand('devgotchi.openPanel', () => {
-        DeveloperPanel.createOrShow(context.extensionUri, devManager);
+        DeveloperPanel.createOrShow(context.extensionUri, devManager, teamManager);
     }));
     // Register command to reset progress
     context.subscriptions.push(vscode.commands.registerCommand('devgotchi.resetProgress', async () => {
@@ -108,8 +143,105 @@ function activate(context) {
     }));
     // Register command to export a shareable stats card
     context.subscriptions.push(vscode.commands.registerCommand('devgotchi.exportStatsCard', () => {
-        DeveloperPanel.createOrShow(context.extensionUri, devManager);
+        DeveloperPanel.createOrShow(context.extensionUri, devManager, teamManager);
         DeveloperPanel.currentPanel?.openShareCard();
+    }));
+    // Register command to open the Settings modal
+    context.subscriptions.push(vscode.commands.registerCommand('devgotchi.openSettings', () => {
+        DeveloperPanel.createOrShow(context.extensionUri, devManager, teamManager);
+        DeveloperPanel.currentPanel?.openSettings();
+    }));
+    // Register progress export: writes the full save (+ settings) to a JSON
+    // file the user picks, so it can be backed up or moved to another machine.
+    context.subscriptions.push(vscode.commands.registerCommand('devgotchi.exportProgress', async () => {
+        const dev = devManager.getDeveloper();
+        const safeName = (dev.name || 'dev').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+        const defaultUri = vscode.Uri.file(path.join(os.homedir(), `devgotchi-progress-${safeName}.json`));
+        const target = await vscode.window.showSaveDialog({
+            defaultUri,
+            filters: { 'DevGotchi Progress': ['json'] }
+        });
+        if (!target)
+            return;
+        try {
+            await vscode.workspace.fs.writeFile(target, Buffer.from(devManager.exportProgressData(), 'utf8'));
+            const choice = await vscode.window.showInformationMessage('💾 Progress exported!', 'Reveal in Folder');
+            if (choice === 'Reveal in Folder') {
+                vscode.commands.executeCommand('revealFileInOS', target);
+            }
+        }
+        catch (err) {
+            vscode.window.showErrorMessage('Failed to export progress.');
+        }
+    }));
+    // Register progress import: reads a previously exported JSON file and
+    // overwrites the current save after explicit confirmation.
+    context.subscriptions.push(vscode.commands.registerCommand('devgotchi.importProgress', async () => {
+        const picked = await vscode.window.showOpenDialog({
+            canSelectMany: false,
+            filters: { 'DevGotchi Progress': ['json'] }
+        });
+        if (!picked || !picked[0])
+            return;
+        const confirm = await vscode.window.showWarningMessage('Importing will overwrite your current DevGotchi progress. This cannot be undone. Continue?', 'Yes', 'No');
+        if (confirm !== 'Yes')
+            return;
+        try {
+            const bytes = await vscode.workspace.fs.readFile(picked[0]);
+            const result = devManager.importProgressData(Buffer.from(bytes).toString('utf8'));
+            if (result.success) {
+                vscode.window.showInformationMessage(result.message);
+            }
+            else {
+                vscode.window.showErrorMessage(result.message);
+            }
+            updateStatusBar();
+            DeveloperPanel.currentPanel?.updateDeveloper();
+        }
+        catch (err) {
+            vscode.window.showErrorMessage('Failed to read that file.');
+        }
+    }));
+    // Register Vacation Mode toggle: freezes stat decay and streak-breaking
+    // for people who can't code for a few days and don't want to come back to
+    // a burnt-out avatar and a broken streak.
+    context.subscriptions.push(vscode.commands.registerCommand('devgotchi.toggleVacationMode', () => {
+        const result = devManager.setVacationMode(!devManager.isVacationModeActive());
+        vscode.window.showInformationMessage(result.message);
+        updateStatusBar();
+        DeveloperPanel.currentPanel?.updateDeveloper();
+    }));
+    // Register the feedback link: opens the GitHub issues page in the
+    // default browser. No in-editor form — keeps things simple and puts
+    // feedback wherever the project is already tracked.
+    context.subscriptions.push(vscode.commands.registerCommand('devgotchi.sendFeedback', () => {
+        vscode.env.openExternal(vscode.Uri.parse('https://github.com/johnfacey/vscode-devgotchi/issues/new'));
+    }));
+    // Register Team Mode toggle. teamManager only exists once a git repo has
+    // been detected (see the Git Integration block below) — if someone runs
+    // this from the Command Palette in a non-git workspace, tell them plainly
+    // rather than silently no-oping.
+    context.subscriptions.push(vscode.commands.registerCommand('devgotchi.toggleTeamMode', async () => {
+        if (!teamManager) {
+            vscode.window.showWarningMessage('Team Mode needs an open git repository.');
+            return;
+        }
+        const result = await teamManager.setEnabled(!teamManager.isEnabled());
+        if (result.success) {
+            vscode.window.showInformationMessage(result.message);
+            if (teamManager.isEnabled()) {
+                await teamManager.writeSnapshot(devManager.getDeveloper());
+            }
+        }
+        else {
+            vscode.window.showWarningMessage(result.message);
+        }
+        DeveloperPanel.currentPanel?.updateDeveloper();
+    }));
+    // Register command to open the Team view directly.
+    context.subscriptions.push(vscode.commands.registerCommand('devgotchi.openTeamView', () => {
+        DeveloperPanel.createOrShow(context.extensionUri, devManager, teamManager);
+        DeveloperPanel.currentPanel?.openTeamView();
     }));
     // Lightweight 1-second ticker purely for a smooth Focus Sprint countdown in
     // the status bar / panel — does not run game logic (that stays on the 30s loop).
@@ -139,6 +271,12 @@ function activate(context) {
     if (gitExtension) {
         const git = gitExtension.exports.getAPI(1);
         const hookRepo = (repo) => {
+            // Team Mode piggybacks on the first repo we see. Multi-root workspaces
+            // with several repos are an edge case we don't try to solve — the
+            // first one is good enough for "does this workspace have a team".
+            if (!teamManager && repo.rootUri) {
+                teamManager = new TeamManager(context, repo.rootUri.fsPath, git.git?.path || 'git');
+            }
             let lastHead = repo.state.HEAD?.commit;
             repo.state.onDidChange(() => {
                 const currentHead = repo.state.HEAD?.commit;
@@ -146,6 +284,9 @@ function activate(context) {
                     lastHead = currentHead;
                     devManager.onGitCommit();
                     updateStatusBar();
+                    // Fire-and-forget: writes the current user's own snapshot file
+                    // (no-op if Team Mode isn't enabled for this workspace).
+                    teamManager?.writeSnapshot(devManager.getDeveloper());
                 }
             });
         };
@@ -155,7 +296,7 @@ function activate(context) {
     }
     // Linter Integration: Listen for diagnostics
     const getErrorCount = () => {
-        return vscode.languages.getDiagnostics().reduce((acc, [uri, diags]) => {
+        return vscode.languages.getDiagnostics().reduce((acc, [, diags]) => {
             return acc + diags.filter(d => d.severity === vscode.DiagnosticSeverity.Error).length;
         }, 0);
     };
@@ -164,6 +305,329 @@ function activate(context) {
         devManager.updateErrorCount(getErrorCount());
         updateStatusBar();
     }));
+}
+// ── WHAT'S NEW ──────────────────────────────────────────────────────────
+// Bump WHATS_NEW_VERSION and update WHATS_NEW_ITEMS whenever a release adds
+// features worth resurfacing to existing users. Keep WHATS_NEW_VERSION in
+// sync with package.json's "version" — there's no build step wiring the two
+// together, so it's a manual pair (same tradeoff the codebase already makes
+// elsewhere, e.g. duplicated color constants across the webview template).
+const WHATS_NEW_VERSION = '2.2.0';
+const WHATS_NEW_ITEMS = [
+    { icon: '⚙️', title: 'Settings Panel', desc: 'Toggle Weekly Recap notifications, reduce achievement popups, and tune stat decay speed (Relaxed/Normal/Intense).' },
+    { icon: '💾', title: 'Progress Export/Import', desc: 'Back up your full save to a JSON file, or restore it on another machine — nothing leaves your computer unless you export it.' },
+    { icon: '🌴', title: 'Vacation Mode', desc: 'Freeze stat decay, burnout, and your streak while you\'re away. Turn it off when you\'re back and pick up right where you left off.' },
+    { icon: '👥', title: 'Team Mode', desc: "See teammates' level and streak — synced through your repo's own git commits, no server or accounts involved." },
+    { icon: '💬', title: 'Feedback Link', desc: 'A direct link in Settings to report bugs or suggest features.' }
+];
+/**
+ * Shows a one-time "What's New" panel to users who are upgrading from an
+ * older version (not brand-new installs — they already get the tutorial).
+ * Only fires once per version, tracked via globalState.
+ */
+function checkAndShowWhatsNew(context, hadExistingSave) {
+    if (!hadExistingSave) {
+        // Brand new install — nothing to "catch up" on, and the tutorial covers this.
+        context.globalState.update('lastSeenVersion', WHATS_NEW_VERSION);
+        return;
+    }
+    const lastSeenVersion = context.globalState.get('lastSeenVersion');
+    if (lastSeenVersion !== WHATS_NEW_VERSION) {
+        WhatsNewPanel.createOrShow(context.extensionUri);
+        context.globalState.update('lastSeenVersion', WHATS_NEW_VERSION);
+    }
+}
+/**
+ * A small, self-contained webview panel announcing new features to
+ * returning users. Intentionally has no message-passing or persistent
+ * state of its own — it's a one-shot announcement, not a game surface.
+ */
+class WhatsNewPanel {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for signature symmetry with DeveloperPanel.createOrShow
+    static createOrShow(extensionUri) {
+        if (WhatsNewPanel.currentPanel) {
+            WhatsNewPanel.currentPanel.panel.reveal();
+            return;
+        }
+        const panel = vscode.window.createWebviewPanel('devGotchiWhatsNew', "🚀 What's New in DevGotchi", vscode.ViewColumn.Two, { enableScripts: true });
+        WhatsNewPanel.currentPanel = new WhatsNewPanel(panel);
+    }
+    constructor(panel) {
+        this.disposables = [];
+        this.panel = panel;
+        this.panel.webview.html = this.getHtmlContent();
+        this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
+        this.panel.webview.onDidReceiveMessage((message) => {
+            if (message.command === 'open-panel') {
+                vscode.commands.executeCommand('devgotchi.openPanel');
+            }
+        }, null, this.disposables);
+    }
+    dispose() {
+        WhatsNewPanel.currentPanel = undefined;
+        this.panel.dispose();
+        while (this.disposables.length) {
+            const x = this.disposables.pop();
+            if (x)
+                x.dispose();
+        }
+    }
+    getHtmlContent() {
+        const itemsHtml = WHATS_NEW_ITEMS.map(item => `
+      <div class="item">
+        <div class="item-icon">${item.icon}</div>
+        <div class="item-body">
+          <div class="item-title">${item.title}</div>
+          <div class="item-desc">${item.desc}</div>
+        </div>
+      </div>
+    `).join('');
+        return `<!DOCTYPE html><html><head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+    <style>
+      :root {
+        --bg-deep: #080812; --bg-panel: #0e0e1e; --bg-card: #13132a;
+        --neon-purple: #9d4edd; --neon-pink: #e040fb; --neon-gold: #ffd740;
+        --text-main: #e8e8ff; --text-dim: #7070a0; --border: #2a2a4a;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: 'Courier New', monospace;
+        background: var(--bg-deep);
+        color: var(--text-main);
+        padding: 28px;
+      }
+      .container { max-width: 480px; margin: 0 auto; }
+      h1 {
+        font-size: 20px;
+        margin-bottom: 4px;
+        background: linear-gradient(90deg, var(--neon-purple), var(--neon-pink));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+      .tagline { font-size: 11px; color: var(--neon-gold); letter-spacing: 2px; margin-bottom: 24px; }
+      .item {
+        display: flex; gap: 14px; align-items: flex-start;
+        background: var(--bg-panel);
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--neon-purple);
+        border-radius: 4px;
+        padding: 14px;
+        margin-bottom: 12px;
+      }
+      .item-icon { font-size: 24px; line-height: 1; }
+      .item-title { font-size: 14px; font-weight: bold; margin-bottom: 4px; }
+      .item-desc { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+      .cta {
+        width: 100%;
+        margin-top: 8px;
+        padding: 12px;
+        background: linear-gradient(135deg, var(--neon-purple), #5c1da4);
+        border: none;
+        color: white;
+        font-family: inherit;
+        font-size: 13px;
+        letter-spacing: 1px;
+        border-radius: 4px;
+        cursor: pointer;
+        box-shadow: 0 0 10px rgba(157,78,221,0.4);
+      }
+      .cta:hover { box-shadow: 0 0 16px rgba(157,78,221,0.6); }
+    </style></head>
+    <body>
+      <div class="container">
+        <h1>WHAT'S NEW IN ${WHATS_NEW_VERSION}</h1>
+        <div class="tagline">CODE IS A MARTIAL ART</div>
+        ${itemsHtml}
+        <button class="cta" onclick="openPanel()">OPEN DEVELOPER PANEL</button>
+      </div>
+      <script>
+        const vscode = acquireVsCodeApi();
+        function openPanel() { vscode.postMessage({ command: 'open-panel' }); }
+      </script>
+    </body></html>`;
+    }
+}
+const TEAM_DIR_NAME = '.devgotchi/team';
+/** Turns an email into a filesystem-safe slug for a per-person snapshot file. */
+function slugifyEmail(email) {
+    const slug = email.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return slug || 'anonymous';
+}
+const defaultExecGit = (gitPath, args, options) => cp.execFileSync(gitPath, args, options);
+/**
+ * Runs `git <args>` in `cwd` and returns trimmed stdout, or undefined if git
+ * isn't available or the command fails for any reason (not a repo yet, no
+ * commits yet, git missing, permissions, etc.). Team Mode always fails
+ * "closed" rather than throwing — it's an optional layer on top of a game,
+ * not something that should ever be able to break the extension.
+ */
+function tryRunGit(gitPath, args, cwd, execFn = defaultExecGit) {
+    try {
+        const result = execFn(gitPath, args, { cwd, encoding: 'utf8', timeout: 5000 });
+        return result.toString().trim();
+    }
+    catch {
+        return undefined;
+    }
+}
+/**
+ * Counts distinct commit-author emails in the repo (capped at the most
+ * recent 500 commits for performance on large histories). Used to decide
+ * whether Team Mode's UI is worth showing at all — a "team" of one is just
+ * clutter, the same reasoning that ruled out a global leaderboard.
+ */
+function countDistinctContributors(gitPath, cwd, execFn) {
+    const output = tryRunGit(gitPath, ['log', '--format=%ae', '-n', '500'], cwd, execFn);
+    if (!output)
+        return 0;
+    const emails = new Set(output.split('\n').map(e => e.trim().toLowerCase()).filter(Boolean));
+    return emails.size;
+}
+/** Reads the local git identity (user.name / user.email) configured for this repo. */
+function getGitIdentity(gitPath, cwd, execFn) {
+    const name = tryRunGit(gitPath, ['config', 'user.name'], cwd, execFn);
+    const email = tryRunGit(gitPath, ['config', 'user.email'], cwd, execFn);
+    if (!name || !email)
+        return undefined;
+    return { name, email };
+}
+/**
+ * Manages Team Mode's on-disk state: enabling/disabling per workspace,
+ * writing the current user's own snapshot file, and reading everyone's
+ * snapshots back in for the Team view. Every git shell-out is injectable
+ * (via `execFn`) purely so tests can simulate multiple teammates without a
+ * real git repo.
+ */
+class TeamManager {
+    constructor(context, repoRoot, gitPath, execFn) {
+        this.context = context;
+        this.repoRoot = repoRoot;
+        this.gitPath = gitPath;
+        this.execFn = execFn;
+    }
+    get teamDir() {
+        return path.join(this.repoRoot, TEAM_DIR_NAME);
+    }
+    isEnabled() {
+        return !!this.context.workspaceState.get('teamModeEnabled');
+    }
+    /**
+     * Whether Team Mode is worth surfacing in the UI at all: needs more than
+     * one distinct commit author in this repo. Cached for the manager's
+     * lifetime since it only changes as new people join the project.
+     */
+    isAvailable() {
+        if (this.contributorCountCache === undefined) {
+            this.contributorCountCache = countDistinctContributors(this.gitPath, this.repoRoot, this.execFn);
+        }
+        return this.contributorCountCache > 1;
+    }
+    async setEnabled(enabled) {
+        if (enabled && !this.isAvailable()) {
+            return { success: false, message: "Team Mode needs a shared git repo with more than one contributor." };
+        }
+        await this.context.workspaceState.update('teamModeEnabled', enabled);
+        if (enabled) {
+            await this.ensureTeamDir();
+        }
+        return {
+            success: true,
+            message: enabled
+                ? '👥 Team Mode on — your progress will be written to .devgotchi/team/ and shared the next time you commit and push.'
+                : '👥 Team Mode off.'
+        };
+    }
+    async ensureTeamDir() {
+        const dirUri = vscode.Uri.file(this.teamDir);
+        try {
+            await vscode.workspace.fs.createDirectory(dirUri);
+        }
+        catch {
+            // Already exists, or can't be created — writeSnapshot() below will
+            // surface a real problem if there genuinely is one.
+        }
+        const readmeUri = vscode.Uri.file(path.join(this.teamDir, 'README.md'));
+        try {
+            await vscode.workspace.fs.stat(readmeUri);
+        }
+        catch {
+            const readme = [
+                '# DevGotchi Team Mode',
+                '',
+                'This folder is created by the [DevGotchi](https://marketplace.visualstudio.com/items?itemName=johnfacey.vscode-devgotchi) VS Code extension.',
+                '',
+                "Each teammate who enables Team Mode gets one small JSON file here with their level, streak, and a few lifetime stats. There's no server involved — files are written locally and shared the normal way, through your team's existing git commits and pushes.",
+                '',
+                'Turn this off anytime from the DevGotchi Settings panel. Safe to delete this whole folder if nobody on the team uses it.'
+            ].join('\n');
+            await vscode.workspace.fs.writeFile(readmeUri, Buffer.from(readme, 'utf8'));
+        }
+    }
+    /**
+     * Writes (or updates) the current user's own snapshot file. Never touches
+     * any other teammate's file, so there's nothing to merge-conflict over —
+     * each person exclusively owns their own file.
+     */
+    async writeSnapshot(dev) {
+        if (!this.isEnabled())
+            return;
+        const identity = getGitIdentity(this.gitPath, this.repoRoot, this.execFn);
+        if (!identity)
+            return;
+        await this.ensureTeamDir();
+        const snapshot = {
+            name: dev.name || identity.name,
+            email: identity.email,
+            level: dev.level,
+            totalXpEarned: dev.totalXpEarned || 0,
+            streak: dev.streak || 0,
+            totalCommits: dev.totalCommits || 0,
+            totalBugsFixed: dev.totalBugsFixed || 0,
+            totalFocusSprintsCompleted: dev.totalFocusSprintsCompleted || 0,
+            lastActive: Date.now()
+        };
+        const fileUri = vscode.Uri.file(path.join(this.teamDir, `${slugifyEmail(identity.email)}.json`));
+        await vscode.workspace.fs.writeFile(fileUri, Buffer.from(JSON.stringify(snapshot, null, 2), 'utf8'));
+    }
+    /**
+     * Reads every snapshot file in the team folder (including your own) and
+     * returns them sorted by lifetime XP, then level, highest first. Corrupt
+     * or unrecognized files are skipped rather than failing the whole view —
+     * a stray hand-edited file shouldn't break the Team view for everyone.
+     */
+    /** The current user's own git email, for the webview to mark "(you)" precisely instead of guessing by name/level. */
+    getOwnEmail() {
+        return getGitIdentity(this.gitPath, this.repoRoot, this.execFn)?.email;
+    }
+    async readTeamSnapshots() {
+        const dirUri = vscode.Uri.file(this.teamDir);
+        let entries;
+        try {
+            entries = await vscode.workspace.fs.readDirectory(dirUri);
+        }
+        catch {
+            return [];
+        }
+        const snapshots = [];
+        for (const [name] of entries) {
+            if (!name.endsWith('.json'))
+                continue;
+            try {
+                const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(path.join(this.teamDir, name)));
+                const parsed = JSON.parse(Buffer.from(bytes).toString('utf8'));
+                if (parsed && typeof parsed.email === 'string' && typeof parsed.level === 'number') {
+                    snapshots.push(parsed);
+                }
+            }
+            catch {
+                // Skip unreadable/corrupt files rather than failing the whole view.
+            }
+        }
+        snapshots.sort((a, b) => (b.totalXpEarned - a.totalXpEarned) || (b.level - a.level));
+        return snapshots;
+    }
 }
 /**
  * Helper to get the emoji corresponding to a specific mood.
@@ -190,6 +654,64 @@ function formatMMSS(ms) {
     return `${m}:${s.toString().padStart(2, '0')}`;
 }
 /**
+ * Fills in any missing fields on a (possibly partial, possibly from an old
+ * save or an imported file) developer object with sensible defaults. This is
+ * the single source of truth for "what does a valid ProgrammerStats look
+ * like" — used when loading from globalState, migrating an old save, and
+ * importing a file exported via `devgotchi.exportProgress`.
+ */
+function normalizeDeveloper(saved) {
+    const totalXpEarned = typeof saved.totalXpEarned === 'number' ? saved.totalXpEarned : 0;
+    const totalCommits = typeof saved.totalCommits === 'number' ? saved.totalCommits : 0;
+    const totalBugsFixed = typeof saved.totalBugsFixed === 'number' ? saved.totalBugsFixed : 0;
+    const totalCoffeeEarned = typeof saved.totalCoffeeEarned === 'number' ? saved.totalCoffeeEarned : 0;
+    const totalFocusSprintsCompleted = typeof saved.totalFocusSprintsCompleted === 'number' ? saved.totalFocusSprintsCompleted : 0;
+    const level = typeof saved.level === 'number' ? saved.level : 1;
+    return {
+        energy: typeof saved.energy === 'number' ? saved.energy : 100,
+        motivation: typeof saved.motivation === 'number' ? saved.motivation : 100,
+        focus: typeof saved.focus === 'number' ? saved.focus : 100,
+        health: typeof saved.health === 'number' ? saved.health : 100,
+        xp: typeof saved.xp === 'number' ? saved.xp : 0,
+        level,
+        lastUpdated: typeof saved.lastUpdated === 'number' ? saved.lastUpdated : Date.now(),
+        mood: saved.mood || 'productive',
+        role: saved.role || '👨‍💻',
+        name: typeof saved.name === 'string' && saved.name.trim() ? saved.name : 'Dev',
+        coffee: typeof saved.coffee === 'number' ? saved.coffee : 50,
+        skills: saved.skills || [],
+        inventory: saved.inventory || [],
+        lastDailyBonus: saved.lastDailyBonus || 0,
+        streak: saved.streak || 0,
+        quests: saved.quests || [],
+        questStreak: saved.questStreak === undefined ? 0 : saved.questStreak,
+        dailyQuestsCompleted: saved.dailyQuestsCompleted === undefined ? false : saved.dailyQuestsCompleted,
+        tutorialCompleted: saved.tutorialCompleted === undefined ? false : saved.tutorialCompleted,
+        achievements: saved.achievements || [],
+        activityLog: saved.activityLog || [],
+        isBurntOut: saved.isBurntOut === undefined ? false : saved.isBurntOut,
+        totalBugsFixed,
+        totalCommits,
+        totalCoffeeEarned,
+        focusSprintEndsAt: saved.focusSprintEndsAt === undefined ? 0 : saved.focusSprintEndsAt,
+        focusSprintMinutes: saved.focusSprintMinutes === undefined ? 0 : saved.focusSprintMinutes,
+        totalFocusSprintsCompleted,
+        activeErrorCount: saved.activeErrorCount === undefined ? 0 : saved.activeErrorCount,
+        totalXpEarned,
+        lastWeeklyRecapAt: saved.lastWeeklyRecapAt === undefined ? Date.now() : saved.lastWeeklyRecapAt,
+        vacationMode: saved.vacationMode === undefined ? false : saved.vacationMode,
+        vacationModeSince: saved.vacationModeSince === undefined ? 0 : saved.vacationModeSince,
+        weeklyRecapSnapshot: saved.weeklyRecapSnapshot || {
+            level,
+            totalXpEarned,
+            totalCommits,
+            totalBugsFixed,
+            totalCoffeeEarned,
+            totalFocusSprintsCompleted
+        }
+    };
+}
+/**
  * Manages the state and logic of the developer avatar.
  * Handles persistence, stat calculations, and game mechanics.
  */
@@ -198,6 +720,7 @@ class DeveloperManager {
         this.lastErrorCount = 0;
         this.context = context;
         this.developer = this.loadDeveloper();
+        this.settings = this.loadSettings();
         this.updateStats();
     }
     /**
@@ -205,101 +728,79 @@ class DeveloperManager {
      */
     loadDeveloper() {
         const saved = this.context.globalState.get('developer');
-        if (saved) {
-            // Ensure new properties exist on old saves
-            if (!saved.inventory)
-                saved.inventory = [];
-            if (!saved.lastDailyBonus)
-                saved.lastDailyBonus = 0;
-            if (!saved.streak)
-                saved.streak = 0;
-            if (!saved.skills)
-                saved.skills = [];
-            if (!saved.quests)
-                saved.quests = [];
-            if (saved.questStreak === undefined)
-                saved.questStreak = 0;
-            if (saved.dailyQuestsCompleted === undefined)
-                saved.dailyQuestsCompleted = false;
-            if (saved.tutorialCompleted === undefined)
-                saved.tutorialCompleted = false;
-            if (!saved.achievements)
-                saved.achievements = [];
-            if (!saved.activityLog)
-                saved.activityLog = [];
-            if (saved.isBurntOut === undefined)
-                saved.isBurntOut = false;
-            if (saved.totalBugsFixed === undefined)
-                saved.totalBugsFixed = 0;
-            if (saved.totalCommits === undefined)
-                saved.totalCommits = 0;
-            if (saved.totalCoffeeEarned === undefined)
-                saved.totalCoffeeEarned = 0;
-            if (saved.focusSprintEndsAt === undefined)
-                saved.focusSprintEndsAt = 0;
-            if (saved.focusSprintMinutes === undefined)
-                saved.focusSprintMinutes = 0;
-            if (saved.totalFocusSprintsCompleted === undefined)
-                saved.totalFocusSprintsCompleted = 0;
-            if (saved.activeErrorCount === undefined)
-                saved.activeErrorCount = 0;
-            if (saved.totalXpEarned === undefined)
-                saved.totalXpEarned = 0;
-            if (saved.lastWeeklyRecapAt === undefined)
-                saved.lastWeeklyRecapAt = Date.now();
-            if (saved.weeklyRecapSnapshot === undefined) {
-                saved.weeklyRecapSnapshot = {
-                    level: saved.level,
-                    totalXpEarned: saved.totalXpEarned,
-                    totalCommits: saved.totalCommits || 0,
-                    totalBugsFixed: saved.totalBugsFixed || 0,
-                    totalCoffeeEarned: saved.totalCoffeeEarned || 0,
-                    totalFocusSprintsCompleted: saved.totalFocusSprintsCompleted || 0
-                };
-            }
-            return saved;
-        }
-        return {
-            energy: 100,
-            motivation: 100,
-            focus: 100,
-            health: 100,
-            xp: 0,
-            level: 1,
-            lastUpdated: Date.now(),
-            mood: 'productive',
-            role: '👨‍💻',
-            name: 'Dev',
-            coffee: 50,
-            skills: [],
-            inventory: [],
-            lastDailyBonus: 0,
-            streak: 0,
-            quests: [],
-            questStreak: 0,
-            dailyQuestsCompleted: false,
-            tutorialCompleted: false,
-            achievements: [],
-            activityLog: [],
-            isBurntOut: false,
-            totalBugsFixed: 0,
-            totalCommits: 0,
-            totalCoffeeEarned: 0,
-            focusSprintEndsAt: 0,
-            focusSprintMinutes: 0,
-            totalFocusSprintsCompleted: 0,
-            activeErrorCount: 0,
-            totalXpEarned: 0,
-            lastWeeklyRecapAt: Date.now(),
-            weeklyRecapSnapshot: {
-                level: 1,
-                totalXpEarned: 0,
-                totalCommits: 0,
-                totalBugsFixed: 0,
-                totalCoffeeEarned: 0,
-                totalFocusSprintsCompleted: 0
-            }
+        return normalizeDeveloper(saved || {});
+    }
+    /**
+     * Loads user settings (notifications, decay rate, etc.) from global storage,
+     * falling back to defaults for anything missing or invalid.
+     */
+    loadSettings() {
+        return mergeSettings(this.context.globalState.get('settings'));
+    }
+    /**
+     * Persists the current settings to global storage.
+     */
+    saveSettings() {
+        this.context.globalState.update('settings', this.settings);
+    }
+    getSettings() {
+        return { ...this.settings };
+    }
+    /**
+     * Updates one or more settings, validating each field, and persists them.
+     */
+    updateSettings(partial) {
+        this.settings = mergeSettings({ ...this.settings, ...partial });
+        this.saveSettings();
+        return { success: true, message: '⚙️ Settings saved.' };
+    }
+    /**
+     * Serializes the full save (progress + settings) to a JSON string, for the
+     * "Export Progress" command. Kept as plain JSON so it's human-readable and
+     * portable between machines.
+     */
+    exportProgressData() {
+        const payload = {
+            schemaVersion: 1,
+            exportedAt: Date.now(),
+            developer: this.developer,
+            settings: this.settings
         };
+        return JSON.stringify(payload, null, 2);
+    }
+    /**
+     * Restores progress (and settings, if present) from a previously exported
+     * JSON file. Validates the shape before committing to overwrite the
+     * current save — an invalid or unrelated JSON file is rejected rather than
+     * silently wiping progress.
+     */
+    importProgressData(raw) {
+        let parsed;
+        try {
+            parsed = JSON.parse(raw);
+        }
+        catch {
+            return { success: false, message: 'That file is not valid JSON.' };
+        }
+        const candidate = parsed && typeof parsed === 'object' && parsed.developer ? parsed.developer : parsed;
+        const looksValid = candidate && typeof candidate === 'object'
+            && typeof candidate.name === 'string'
+            && typeof candidate.level === 'number'
+            && typeof candidate.xp === 'number'
+            && typeof candidate.energy === 'number'
+            && typeof candidate.motivation === 'number'
+            && typeof candidate.focus === 'number'
+            && typeof candidate.health === 'number';
+        if (!looksValid) {
+            return { success: false, message: "That file doesn't look like a DevGotchi progress export." };
+        }
+        this.developer = normalizeDeveloper(candidate);
+        if (parsed && typeof parsed === 'object' && parsed.settings && typeof parsed.settings === 'object') {
+            this.settings = mergeSettings(parsed.settings);
+            this.saveSettings();
+        }
+        this.saveDeveloper();
+        return { success: true, message: `Progress imported — welcome back, ${this.developer.name}!` };
     }
     /**
      * Persists the current state to global storage.
@@ -329,7 +830,9 @@ class DeveloperManager {
             earned.push(id);
             const ach = ACHIEVEMENTS.find(a => a.id === id);
             this.addLog(`Achievement unlocked: ${ach.icon} ${ach.name}`, 'achievement');
-            vscode.window.showInformationMessage(`🏅 Achievement Unlocked: ${ach.icon} ${ach.name} — ${ach.description}`);
+            if (!this.settings.reduceNotifications) {
+                vscode.window.showInformationMessage(`🏅 Achievement Unlocked: ${ach.icon} ${ach.name} — ${ach.description}`);
+            }
         };
         if (this.developer.totalBugsFixed >= 1)
             unlock('first_save'); // reuse as first activity
@@ -410,7 +913,9 @@ class DeveloperManager {
             this.developer.achievements.push('survived_burnout');
             const ach = ACHIEVEMENTS.find(a => a.id === 'survived_burnout');
             this.addLog('✅ Recovered from burnout!', 'burnout');
-            vscode.window.showInformationMessage(`🏅 Achievement Unlocked: ${ach.icon} ${ach.name} — ${ach.description}`);
+            if (!this.settings.reduceNotifications) {
+                vscode.window.showInformationMessage(`🏅 Achievement Unlocked: ${ach.icon} ${ach.name} — ${ach.description}`);
+            }
         }
     }
     /**
@@ -442,22 +947,44 @@ class DeveloperManager {
      */
     updateStats() {
         const now = Date.now();
+        // Vacation Mode: freeze everything. No decay, no burnout, no random
+        // events, no quest/achievement checks — and critically, we advance
+        // lastDailyBonus/lastUpdated by the same elapsed time so that once
+        // Vacation Mode is turned off, the gap you were away for doesn't read as
+        // "missed a day" (which would reset your streak) or "N hours of banked
+        // decay" (which would tank your stats the moment you come back).
+        if (this.developer.vacationMode) {
+            const elapsed = now - this.developer.lastUpdated;
+            this.developer.lastUpdated = now;
+            // Only shift lastDailyBonus forward if a bonus has actually fired
+            // before (it's 0 as a sentinel for "never happened yet") — otherwise
+            // 0 + elapsed produces a bogus near-epoch timestamp that reads as an
+            // enormous gap and wrongly resets the (nonexistent) streak to 1.
+            if (this.developer.lastDailyBonus) {
+                this.developer.lastDailyBonus += elapsed;
+            }
+            this.developer.lastWeeklyRecapAt = (this.developer.lastWeeklyRecapAt || now) + elapsed;
+            this.developer.mood = this.calculateMood();
+            this.saveDeveloper();
+            return;
+        }
         const hoursPassed = (now - this.developer.lastUpdated) / (1000 * 60 * 60);
-        let energyDecay = 4;
+        const decayMultiplier = DECAY_RATE_MULTIPLIERS[this.settings.decayRate];
+        let energyDecay = 4 * decayMultiplier;
         if (this.developer.inventory.includes('furn_chair'))
             energyDecay *= 0.85;
-        let motivationDecay = 2;
+        let motivationDecay = 2 * decayMultiplier;
         if (this.developer.inventory.includes('acc_keyboard'))
             motivationDecay *= 0.85;
         this.developer.energy = Math.max(0, this.developer.energy - hoursPassed * energyDecay);
         this.developer.motivation = Math.max(0, this.developer.motivation - hoursPassed * motivationDecay);
-        let focusDecay = this.developer.skills.includes('iron_focus') ? 2.1 : 3; // 30% slower
+        let focusDecay = (this.developer.skills.includes('iron_focus') ? 2.1 : 3) * decayMultiplier; // 30% slower
         if (this.isFocusSprintActive())
             focusDecay *= 0.5; // Deep work protects your Focus stat
         this.developer.focus = Math.max(0, this.developer.focus - hoursPassed * focusDecay);
         // Linter Stress: Active errors drain energy and motivation over time
         if (this.lastErrorCount > 0) {
-            const stressFactor = this.lastErrorCount * 0.05;
+            const stressFactor = this.lastErrorCount * 0.05 * decayMultiplier;
             this.developer.energy = Math.max(0, this.developer.energy - stressFactor);
             this.developer.motivation = Math.max(0, this.developer.motivation - stressFactor);
         }
@@ -508,7 +1035,9 @@ class DeveloperManager {
             parts.push(`🔥 ${this.developer.streak || 0}-day streak`);
             const summary = parts.join(' · ');
             this.addLog(`📊 Weekly recap: ${summary}`, 'event');
-            vscode.window.showInformationMessage(`📊 Your week with ${this.developer.name}: ${summary}`);
+            if (this.settings.weeklyRecapEnabled) {
+                vscode.window.showInformationMessage(`📊 Your week with ${this.developer.name}: ${summary}`);
+            }
         }
         // Reset the snapshot regardless of activity, so next week measures a fresh delta.
         this.developer.lastWeeklyRecapAt = Date.now();
@@ -526,6 +1055,35 @@ class DeveloperManager {
      */
     isFocusSprintActive() {
         return !!this.developer.focusSprintEndsAt && this.developer.focusSprintEndsAt > Date.now();
+    }
+    /**
+     * Whether Vacation Mode is currently active.
+     */
+    isVacationModeActive() {
+        return !!this.developer.vacationMode;
+    }
+    /**
+     * Toggles Vacation Mode on/off. While on, updateStats() freezes stat decay,
+     * burnout, and streak-breaking entirely — see the early-return in
+     * updateStats() for how the streak/decay gap is bridged on return.
+     */
+    setVacationMode(enabled) {
+        if (enabled === this.isVacationModeActive()) {
+            return {
+                success: false,
+                message: enabled ? 'Vacation Mode is already on.' : 'Vacation Mode is already off.'
+            };
+        }
+        this.developer.vacationMode = enabled;
+        this.developer.vacationModeSince = enabled ? Date.now() : 0;
+        this.addLog(enabled ? '🌴 Vacation Mode enabled — stats and streak are frozen.' : '🌴 Vacation Mode disabled — welcome back!', 'event');
+        this.saveDeveloper();
+        return {
+            success: true,
+            message: enabled
+                ? '🌴 Vacation Mode on — your stats and streak are frozen until you turn it off.'
+                : '🌴 Vacation Mode off — welcome back! Decay and your streak have resumed.'
+        };
     }
     /**
      * Starts a timed Focus Sprint. While active, XP earned is multiplied and
@@ -651,44 +1209,10 @@ class DeveloperManager {
     async resetProgress() {
         const selection = await vscode.window.showWarningMessage('Are you sure you want to reset all progress? This cannot be undone.', 'Yes', 'No');
         if (selection === 'Yes') {
-            this.developer = {
-                energy: 100,
-                motivation: 100,
-                focus: 100,
-                health: 100,
-                xp: 0,
-                level: 1,
-                lastUpdated: Date.now(),
-                mood: 'productive',
-                role: '👨‍💻',
-                name: 'Dev',
-                coffee: 50,
-                skills: [],
-                inventory: [],
-                lastDailyBonus: 0,
-                streak: 0,
-                quests: [],
-                achievements: [],
-                activityLog: [],
-                isBurntOut: false,
-                totalBugsFixed: 0,
-                totalCommits: 0,
-                totalCoffeeEarned: 0,
-                focusSprintEndsAt: 0,
-                focusSprintMinutes: 0,
-                totalFocusSprintsCompleted: 0,
-                activeErrorCount: 0,
-                totalXpEarned: 0,
-                lastWeeklyRecapAt: Date.now(),
-                weeklyRecapSnapshot: {
-                    level: 1,
-                    totalXpEarned: 0,
-                    totalCommits: 0,
-                    totalBugsFixed: 0,
-                    totalCoffeeEarned: 0,
-                    totalFocusSprintsCompleted: 0
-                }
-            };
+            // Reuse the same defaulting logic as a fresh install/import, so this
+            // never drifts out of sync with normalizeDeveloper() as new fields
+            // get added (note: settings are intentionally untouched by a reset).
+            this.developer = normalizeDeveloper({});
             this.saveDeveloper();
             this.updateStats();
             vscode.window.showInformationMessage('Progress reset successfully.');
@@ -729,7 +1253,9 @@ class DeveloperManager {
         if (!this.developer.achievements.includes('first_save')) {
             this.developer.achievements.push('first_save');
             const ach = ACHIEVEMENTS.find(a => a.id === 'first_save');
-            vscode.window.showInformationMessage(`🏅 Achievement Unlocked: ${ach.icon} ${ach.name}`);
+            if (!this.settings.reduceNotifications) {
+                vscode.window.showInformationMessage(`🏅 Achievement Unlocked: ${ach.icon} ${ach.name}`);
+            }
         }
         this.developer.motivation = Math.min(100, this.developer.motivation + 3);
         this.developer.coffee += 1;
@@ -927,19 +1453,20 @@ class DeveloperPanel {
     /**
      * Creates or reveals the existing panel.
      */
-    static createOrShow(extensionUri, devManager) {
+    static createOrShow(extensionUri, devManager, teamManager) {
         if (DeveloperPanel.currentPanel) {
             DeveloperPanel.currentPanel.panel.reveal();
             return;
         }
         const panel = vscode.window.createWebviewPanel('devGotchi', '👨‍💻 DevGotchi', vscode.ViewColumn.Two, { enableScripts: true, retainContextWhenHidden: true });
-        DeveloperPanel.currentPanel = new DeveloperPanel(panel, devManager);
+        DeveloperPanel.currentPanel = new DeveloperPanel(panel, devManager, teamManager);
     }
     /**
      * Private constructor. Sets up the webview HTML and message listeners.
      */
-    constructor(panel, devManager) {
+    constructor(panel, devManager, teamManager) {
         this.devManager = devManager;
+        this.teamManager = teamManager;
         this.disposables = [];
         this.panel = panel;
         this.panel.webview.html = this.getHtmlContent();
@@ -964,11 +1491,12 @@ class DeveloperPanel {
                 case 'equip-item':
                     this.updatePanel(this.devManager.equipItem(message.itemId));
                     break;
-                case 'challenge-completed':
+                case 'challenge-completed': {
                     const coffee = this.devManager.challengeCompleted(message.score);
                     this.panel.webview.postMessage({ command: 'challenge-result', result: { message: `Earned ${coffee} coffee beans!` } });
                     this.updateDeveloper();
                     break;
+                }
                 case 'complete-tutorial':
                     this.devManager.completeTutorial();
                     break;
@@ -984,6 +1512,33 @@ class DeveloperPanel {
                     break;
                 case 'save-stats-image':
                     this.saveStatsImage(message.dataUrl, message.suggestedName);
+                    break;
+                case 'save-settings':
+                    this.updatePanel(this.devManager.updateSettings(message.settings));
+                    break;
+                case 'export-progress':
+                    vscode.commands.executeCommand('devgotchi.exportProgress');
+                    break;
+                case 'import-progress':
+                    vscode.commands.executeCommand('devgotchi.importProgress');
+                    break;
+                case 'reset-progress':
+                    vscode.commands.executeCommand('devgotchi.resetProgress');
+                    break;
+                case 'toggle-vacation-mode':
+                    this.updatePanel(this.devManager.setVacationMode(!!message.enabled));
+                    break;
+                case 'open-feedback':
+                    vscode.commands.executeCommand('devgotchi.sendFeedback');
+                    break;
+                case 'get-team-data':
+                    this.sendTeamData();
+                    break;
+                case 'toggle-team-mode':
+                    Promise.resolve(vscode.commands.executeCommand('devgotchi.toggleTeamMode')).then(() => {
+                        this.updateDeveloper();
+                        this.sendTeamData();
+                    });
                     break;
             }
         }, null, this.disposables);
@@ -1025,7 +1580,15 @@ class DeveloperPanel {
      * Sends the latest developer stats to the webview to update the UI.
      */
     updateDeveloper() {
-        this.panel.webview.postMessage({ command: 'update', developer: this.devManager.getDeveloper() });
+        this.panel.webview.postMessage({
+            command: 'update',
+            developer: this.devManager.getDeveloper(),
+            settings: this.devManager.getSettings(),
+            // isAvailable() is cached after its first (real) git shell-out, so
+            // calling it on every 30s tick is cheap.
+            teamAvailable: this.teamManager?.isAvailable() ?? false,
+            teamEnabled: this.teamManager?.isEnabled() ?? false
+        });
     }
     /**
      * Tells the webview to open the Share Stats Card modal (used by the
@@ -1033,6 +1596,40 @@ class DeveloperPanel {
      */
     openShareCard() {
         this.panel.webview.postMessage({ command: 'open-share-modal' });
+    }
+    /**
+     * Tells the webview to open the Settings modal (used by the
+     * "Open Settings" command palette entry).
+     */
+    openSettings() {
+        this.panel.webview.postMessage({ command: 'open-settings-modal', settings: this.devManager.getSettings() });
+    }
+    /**
+     * Tells the webview to open the Team modal and kicks off an async read of
+     * every teammate's snapshot file (used by the "Open Team View" command
+     * palette entry and the panel's Team button).
+     */
+    async openTeamView() {
+        this.panel.webview.postMessage({ command: 'open-team-modal' });
+        await this.sendTeamData();
+    }
+    /**
+     * Reads all team snapshot files (if Team Mode's manager exists at all —
+     * it won't in a non-git workspace) and sends them to the webview.
+     */
+    async sendTeamData() {
+        if (!this.teamManager) {
+            this.panel.webview.postMessage({ command: 'team-data', snapshots: [], enabled: false, available: false });
+            return;
+        }
+        const snapshots = await this.teamManager.readTeamSnapshots();
+        this.panel.webview.postMessage({
+            command: 'team-data',
+            snapshots,
+            enabled: this.teamManager.isEnabled(),
+            available: this.teamManager.isAvailable(),
+            ownEmail: this.teamManager.getOwnEmail()
+        });
     }
     /**
      * Cleans up resources when the panel is closed.
@@ -1529,6 +2126,12 @@ class DeveloperPanel {
       font-family: inherit;
     }
     .modal-input:focus { outline: none; border-color: var(--neon-purple); }
+    .settings-row { margin-bottom: 14px; text-align: left; }
+    .settings-label {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; color: var(--text-main); cursor: pointer;
+    }
+    .settings-divider { height: 1px; background: var(--border); margin: 16px 0; }
     .modal-buttons { display: flex; gap: 10px; margin-top: 16px; }
     .modal-buttons button {
       flex: 1;
@@ -1879,6 +2482,12 @@ class DeveloperPanel {
           <button id="btn-share" class="action-btn" onclick="showShareModal()" title="Share your stats">
             <div class="action-icon">📤</div><div class="action-label">Share</div>
           </button>
+          <button id="btn-settings" class="action-btn" onclick="showSettingsModal()" title="Settings">
+            <div class="action-icon">⚙️</div><div class="action-label">Settings</div>
+          </button>
+          <button id="btn-team" class="action-btn" onclick="showTeamModal()" title="Team" style="display:none;">
+            <div class="action-icon">👥</div><div class="action-label">Team</div>
+          </button>
         </div>
 
         <!-- ── CHALLENGE PANEL ── -->
@@ -1947,6 +2556,9 @@ class DeveloperPanel {
       <div id="burnoutBanner" style="display:none; background: linear-gradient(90deg, #7a0000, #ff1744); padding: 10px 16px; margin-bottom: 10px; border-radius: 3px; font-size: 12px; letter-spacing: 2px; text-align:center; animation: burnoutPulse 1s ease-in-out infinite;">
         ☠ CRITICAL BURNOUT — TAKE A BREAK TO RECOVER ☠
       </div>
+      <div id="vacationBanner" style="display:none; background: linear-gradient(90deg, #0d4d3a, #14a67a); padding: 10px 16px; margin-bottom: 10px; border-radius: 3px; font-size: 12px; letter-spacing: 1px; text-align:center;">
+        🌴 VACATION MODE — stats and streak are frozen. Turn it off in Settings when you're back.
+      </div>
 
       <!-- ── ACTIVITY LOG ── -->
       <div id="logPanel" style="display:none; background:var(--bg-panel); border:1px solid var(--border); border-top:2px solid var(--neon-blue); border-radius:4px; padding:14px; margin-bottom:12px;">
@@ -1978,6 +2590,74 @@ class DeveloperPanel {
         </div>
       </div>
 
+      <!-- ── SETTINGS MODAL ── -->
+      <div id="settingsModal" class="modal">
+        <div class="modal-content" style="max-width:420px">
+          <h3>⚙️ Settings</h3>
+          <div class="settings-row">
+            <label class="settings-label">
+              <input type="checkbox" id="setWeeklyRecap"> Weekly Recap notifications
+            </label>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label">
+              <input type="checkbox" id="setReduceNotifications"> Reduce achievement notifications
+            </label>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label" style="display:block; margin-bottom:6px; cursor:default;">Stat decay speed</label>
+            <select id="setDecayRate" class="modal-input">
+              <option value="relaxed">Relaxed (slower decay)</option>
+              <option value="normal">Normal</option>
+              <option value="intense">Intense (faster decay)</option>
+            </select>
+          </div>
+          <div class="modal-buttons" style="margin-top:8px;">
+            <button onclick="closeSettingsModal()">CANCEL</button>
+            <button onclick="saveSettingsForm()">SAVE</button>
+          </div>
+          <div class="settings-divider"></div>
+          <div class="settings-row">
+            <label class="settings-label">
+              <input type="checkbox" id="setVacationMode" onchange="toggleVacationModeFromSettings()"> 🌴 Vacation Mode (freeze stats &amp; streak)
+            </label>
+            <div style="font-size:11px; color:var(--text-dim); margin-top:4px; padding-left:24px;">
+              Takes effect immediately — good for trips or time off where you don't want to lose your streak or burn out.
+            </div>
+          </div>
+          <div class="settings-divider"></div>
+          <div class="settings-row" id="teamSettingsRow" style="display:none;">
+            <label class="settings-label">
+              <input type="checkbox" id="setTeamMode" onchange="toggleTeamModeFromSettings()"> 👥 Team Mode (share progress via git)
+            </label>
+            <div style="font-size:11px; color:var(--text-dim); margin-top:4px; padding-left:24px;">
+              Writes your progress to <code>.devgotchi/team/</code> in this repo, shared the next time you commit and push. No server — visible to anyone with repo access.
+            </div>
+          </div>
+          <div class="settings-divider" id="teamSettingsDivider" style="display:none;"></div>
+          <div class="settings-row">
+            <label class="settings-label" style="display:block; margin-bottom:8px; cursor:default;">Progress data</label>
+            <div class="modal-buttons">
+              <button onclick="exportProgress()">💾 EXPORT</button>
+              <button onclick="importProgress()">📂 IMPORT</button>
+            </div>
+          </div>
+          <button class="modal-close-btn" style="margin-top:14px; color:var(--neon-pink); border-color:var(--neon-pink);" onclick="confirmResetProgress()">RESET ALL PROGRESS</button>
+          <div class="settings-row" style="text-align:center; margin-top:14px; margin-bottom:0;">
+            <a href="#" onclick="sendFeedback(); return false;" style="color:var(--neon-blue); font-size:12px; text-decoration:underline; cursor:pointer;">💬 Send Feedback / Report a Bug</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── TEAM MODAL ── -->
+      <div id="teamModal" class="modal">
+        <div class="modal-content" style="max-width:420px">
+          <h3>👥 Team</h3>
+          <div id="teamContent" style="font-size:12px; color:var(--text-dim); text-align:center; padding:12px 0;">Loading…</div>
+          <button class="modal-close-btn" onclick="closeTeamModal()">CLOSE</button>
+        </div>
+      </div>
+
       <div id="tutorialOverlay" class="tutorial-overlay"></div>
       <div id="tutorialBox" class="tutorial-box">
         <h3 id="tutTitle">Welcome!</h3>
@@ -1989,8 +2669,92 @@ class DeveloperPanel {
         const vscode = acquireVsCodeApi();
         let currentChallenge = null;
         let currentDev = null;
+        let currentSettings = null;
+        let teamAvailable = false;
+        let teamEnabled = false;
         const SKILLS = ${JSON.stringify(SKILLS)};
         const SHOP_ITEMS = ${JSON.stringify(SHOP_ITEMS)};
+
+        // ── SETTINGS ──
+        function showSettingsModal() {
+          document.getElementById('settingsModal').classList.add('active');
+          renderSettings();
+        }
+        function closeSettingsModal() { document.getElementById('settingsModal').classList.remove('active'); }
+        function renderSettings() {
+          if (currentSettings) {
+            document.getElementById('setWeeklyRecap').checked = currentSettings.weeklyRecapEnabled !== false;
+            document.getElementById('setReduceNotifications').checked = !!currentSettings.reduceNotifications;
+            document.getElementById('setDecayRate').value = currentSettings.decayRate || 'normal';
+          }
+          if (currentDev) {
+            document.getElementById('setVacationMode').checked = !!currentDev.vacationMode;
+          }
+          const teamRow = document.getElementById('teamSettingsRow');
+          const teamDivider = document.getElementById('teamSettingsDivider');
+          if (teamAvailable || teamEnabled) {
+            teamRow.style.display = 'block';
+            teamDivider.style.display = 'block';
+            document.getElementById('setTeamMode').checked = teamEnabled;
+          } else {
+            teamRow.style.display = 'none';
+            teamDivider.style.display = 'none';
+          }
+        }
+        function saveSettingsForm() {
+          const settings = {
+            weeklyRecapEnabled: document.getElementById('setWeeklyRecap').checked,
+            reduceNotifications: document.getElementById('setReduceNotifications').checked,
+            decayRate: document.getElementById('setDecayRate').value
+          };
+          vscode.postMessage({ command: 'save-settings', settings });
+          closeSettingsModal();
+        }
+        function exportProgress() { vscode.postMessage({ command: 'export-progress' }); }
+        function importProgress() { vscode.postMessage({ command: 'import-progress' }); }
+        function confirmResetProgress() { vscode.postMessage({ command: 'reset-progress' }); }
+
+        // Vacation Mode takes effect immediately on toggle, unlike the other
+        // settings above which batch into the SAVE button — it's live game
+        // state, not a persisted preference, so it shouldn't wait for Save.
+        function toggleVacationModeFromSettings() {
+          const enabled = document.getElementById('setVacationMode').checked;
+          vscode.postMessage({ command: 'toggle-vacation-mode', enabled });
+        }
+
+        function sendFeedback() { vscode.postMessage({ command: 'open-feedback' }); }
+
+        // ── TEAM MODE ──
+        // Like Vacation Mode, this takes effect immediately rather than
+        // waiting for Settings' SAVE button — it's a live workspace-scoped
+        // toggle, not a batched preference.
+        function toggleTeamModeFromSettings() {
+          vscode.postMessage({ command: 'toggle-team-mode' });
+        }
+        function showTeamModal() {
+          document.getElementById('teamModal').classList.add('active');
+          document.getElementById('teamContent').innerHTML = 'Loading…';
+          vscode.postMessage({ command: 'get-team-data' });
+        }
+        function closeTeamModal() { document.getElementById('teamModal').classList.remove('active'); }
+        function renderTeamData(data) {
+          const el = document.getElementById('teamContent');
+          if (!data.enabled) {
+            el.innerHTML = '<p>Team Mode is off. Turn it on in Settings to share your progress with teammates via git — no server involved.</p>';
+            return;
+          }
+          if (!data.snapshots || data.snapshots.length === 0) {
+            el.innerHTML = '<p>No teammates found yet. Once you and a teammate both enable Team Mode and push/pull, you\\'ll show up here.</p>';
+            return;
+          }
+          let html = '<table class="leaderboard-table"><thead><tr><th>Dev</th><th>Lvl</th><th>Streak</th></tr></thead><tbody>';
+          data.snapshots.forEach(s => {
+            const isYou = data.ownEmail && s.email === data.ownEmail;
+            html += '<tr' + (isYou ? ' style="color:var(--neon-gold)"' : '') + '><td>' + (s.name || s.email) + (isYou ? ' (you)' : '') + '</td><td>' + s.level + '</td><td>🔥 ' + (s.streak || 0) + '</td></tr>';
+          });
+          html += '</tbody></table>';
+          el.innerHTML = html;
+        }
 
         function giveCoffee() { vscode.postMessage({ command: 'coffee' }); }
         function takeBreak() { vscode.postMessage({ command: 'break' }); }
@@ -2217,6 +2981,10 @@ class DeveloperPanel {
           if (m.command === 'update') {
             const dev = m.developer;
             currentDev = dev;
+            if (m.settings) currentSettings = m.settings;
+            teamAvailable = !!m.teamAvailable;
+            teamEnabled = !!m.teamEnabled;
+            document.getElementById('btn-team').style.display = (teamAvailable || teamEnabled) ? 'flex' : 'none';
             updateFocusUI();
 
             // Stats
@@ -2288,6 +3056,7 @@ class DeveloperPanel {
             if(document.getElementById('questsModal').classList.contains('active')) renderQuests();
             if(document.getElementById('achievementsModal').classList.contains('active')) renderAchievements();
             if(document.getElementById('logPanel').style.display !== 'none') renderLog();
+            if(document.getElementById('settingsModal').classList.contains('active')) renderSettings();
 
             // Burnout state
             const body = document.body;
@@ -2303,6 +3072,8 @@ class DeveloperPanel {
               burnoutBanner.style.display  = 'none';
             }
 
+            document.getElementById('vacationBanner').style.display = dev.vacationMode ? 'block' : 'none';
+
             if (!dev.tutorialCompleted && !isTutorialActive) {
               startTutorial();
             }
@@ -2316,6 +3087,20 @@ class DeveloperPanel {
           }
           if (m.command === 'open-share-modal') {
             showShareModal();
+          }
+          if (m.command === 'open-settings-modal') {
+            if (m.settings) currentSettings = m.settings;
+            showSettingsModal();
+          }
+          if (m.command === 'open-team-modal') {
+            showTeamModal();
+          }
+          if (m.command === 'team-data') {
+            teamEnabled = !!m.enabled;
+            teamAvailable = !!m.available;
+            document.getElementById('btn-team').style.display = (teamAvailable || teamEnabled) ? 'flex' : 'none';
+            renderTeamData(m);
+            if (document.getElementById('settingsModal').classList.contains('active')) renderSettings();
           }
         });
 

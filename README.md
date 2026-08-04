@@ -115,6 +115,34 @@ Turn your progress into something you can actually show people:
 - **🖼️ Save as Image** — a cyberpunk-styled PNG stats card, rendered client-side and saved wherever you like — good for posting your progress on social media.
 - Both are zero-telemetry: everything is generated locally in the panel, nothing leaves your machine except the file you choose to save or the text you choose to paste.
 
+### ⚙️ Settings
+A new Settings button on the panel (and `DevGotchi: Open Settings`) lets you tune the experience:
+- **Weekly Recap notifications** — turn the weekly summary popup on/off (it still logs to the Activity Log either way).
+- **Reduce achievement notifications** — suppress achievement-unlock popups if they feel like noise; achievements still unlock and log normally.
+- **Stat decay speed** — Relaxed, Normal, or Intense, for a more forgiving or more high-stakes pace.
+
+### 💾 Progress Export/Import
+Your progress lives in VS Code's local storage, but you can move or back it up:
+- **`DevGotchi: Export Progress`** — saves your full save (stats + settings) as a portable JSON file.
+- **`DevGotchi: Import Progress`** — restores from a previously exported file, after an explicit confirmation since it overwrites your current save.
+- Both are also available as buttons inside the Settings panel. Fully local — no accounts, no server round-trip.
+
+### 🌴 Vacation Mode
+Going away for a few days shouldn't cost you your streak or leave your dev burnt out when you get back:
+- Toggle it in Settings (or `DevGotchi: Toggle Vacation Mode`) — takes effect immediately.
+- While on: stat decay, burnout, and streak-breaking are all frozen. A banner on the panel reminds you it's active.
+- Turn it off when you're back and everything resumes exactly where it left off — no penalty for the time away.
+
+### 💬 Feedback
+A "Send Feedback / Report a Bug" link at the bottom of the Settings panel (and `DevGotchi: Send Feedback`) opens the GitHub issues page directly — the fastest way to reach me with bugs or ideas.
+
+### 👥 Team Mode
+See your teammates' progress without any server, accounts, or DevGotchi backend — it's synced entirely through git:
+- Turn it on in Settings (or `DevGotchi: Toggle Team Mode`). Only available for repos with more than one contributor.
+- Your progress gets written to `.devgotchi/team/<you>.json` inside the repo. DevGotchi never runs git commands that change anything — you commit and push it yourself, the same way you already share every other file.
+- A new 👥 Team button opens a view of everyone who's enabled it: name, level, and streak, pulled from whatever's currently on disk (as fresh as your last `git pull`).
+- Worth knowing: this makes your stats visible to anyone with access to the repo — it's an explicit opt-in, not a default.
+
 ---
 
 ## 🚀 Getting Started
@@ -135,6 +163,13 @@ Turn your progress into something you can actually show people:
 | `DevGotchi: Start Focus Sprint (Pomodoro)` | Start a 15/25/50-minute focus sprint for 1.5x XP |
 | `DevGotchi: Cancel Focus Sprint` | Cancel the current sprint early (no completion bonus) |
 | `DevGotchi: Export Stats Card` | Open the panel and bring up the shareable stats card |
+| `DevGotchi: Open Settings` | Open the panel and bring up the Settings modal |
+| `DevGotchi: Export Progress` | Save your full progress + settings to a JSON file |
+| `DevGotchi: Import Progress` | Restore progress + settings from a previously exported file |
+| `DevGotchi: Toggle Vacation Mode` | Freeze/unfreeze stat decay and your streak |
+| `DevGotchi: Send Feedback` | Open the GitHub issues page to report a bug or suggest a feature |
+| `DevGotchi: Toggle Team Mode` | Turn Team Mode on/off for this workspace |
+| `DevGotchi: Open Team View` | Open the panel and bring up the Team view |
 
 ---
 
@@ -159,7 +194,7 @@ Turn your progress into something you can actually show people:
 │ ◈ Focus Sprint      [1.5x XP]      │
 │         18:42 remaining            │
 ├─────────────────────────────────────┤
-│ ☕ 🎯 🌴 ⚡ 🛍️ 🏆 📜 🎵 🏅 📡 📤 │
+│ ☕ 🎯 🌴 ⚡ 🛍️ 🏆 📜 🎵 🏅 📡 📤 ⚙️ 👥│  (👥 only shows for a shared repo)
 └─────────────────────────────────────┘
 ```
 

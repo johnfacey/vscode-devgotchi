@@ -4,6 +4,16 @@ All notable changes to the "DevGotchi" extension will be documented in this file
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-08-03
+
+### Added
+- **Settings panel**: a new ⚙️ Settings button on the panel (and `DevGotchi: Open Settings` command) lets you toggle Weekly Recap notifications, reduce achievement popups (they still log to the Activity Log), and choose a stat decay speed (Relaxed / Normal / Intense). Settings are stored separately from progress, so resetting or importing progress never touches them.
+- **Progress export/import**: `DevGotchi: Export Progress` saves your full save (stats + settings) as a portable JSON file; `DevGotchi: Import Progress` restores from one after an explicit confirmation, so you can back up progress or move it to another machine. Both are also available as Export/Import buttons inside the new Settings panel.
+- **Vacation Mode**: a new toggle in Settings (and `DevGotchi: Toggle Vacation Mode`) freezes stat decay, burnout, and streak-breaking entirely while it's on — so a few days off doesn't come back to a burnt-out avatar or a broken streak. A banner shows on the panel while it's active; turn it off to resume normally right where you left off.
+- **Feedback link**: a "💬 Send Feedback / Report a Bug" link inside the Settings panel (and `DevGotchi: Send Feedback` command) opens the GitHub issues page directly.
+- **Team Mode**: an opt-in, per-workspace way to see teammates' progress — no server, no accounts. When enabled (Settings, or `DevGotchi: Toggle Team Mode`), your progress is written to `.devgotchi/team/<you>.json` in the repo; syncing happens through your team's normal git commits and pushes. A new 👥 Team button/view (also `DevGotchi: Open Team View`) shows everyone's level and streak. Only shown for repos with more than one contributor — a "team" of one is just clutter.
+- A "What's New" popup now shows existing users a summary of new features when the extension updates to a new version.
+
 ## [2.1.0] - 2026-07-06
 
 ### Added

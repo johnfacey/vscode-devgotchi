@@ -2,7 +2,7 @@
   "name": "vscode-devgotchi",
   "displayName": "DevGotchi - Your Virtual Developer",
   "description": "A cyberpunk RPG for your coding sessions. Level up, earn XP, and fight off burnout as a living developer avatar tracks your focus, energy, and motivation in real time.",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -35,6 +35,41 @@
       {
         "command": "devgotchi.exportStatsCard",
         "title": "Export Stats Card",
+        "category": "DevGotchi"
+      },
+      {
+        "command": "devgotchi.openSettings",
+        "title": "Open Settings",
+        "category": "DevGotchi"
+      },
+      {
+        "command": "devgotchi.exportProgress",
+        "title": "Export Progress",
+        "category": "DevGotchi"
+      },
+      {
+        "command": "devgotchi.importProgress",
+        "title": "Import Progress",
+        "category": "DevGotchi"
+      },
+      {
+        "command": "devgotchi.toggleVacationMode",
+        "title": "Toggle Vacation Mode",
+        "category": "DevGotchi"
+      },
+      {
+        "command": "devgotchi.sendFeedback",
+        "title": "Send Feedback / Report a Bug",
+        "category": "DevGotchi"
+      },
+      {
+        "command": "devgotchi.toggleTeamMode",
+        "title": "Toggle Team Mode",
+        "category": "DevGotchi"
+      },
+      {
+        "command": "devgotchi.openTeamView",
+        "title": "Open Team View",
         "category": "DevGotchi"
       }
     ]
