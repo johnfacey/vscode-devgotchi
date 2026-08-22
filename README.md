@@ -101,8 +101,15 @@ Unlock passive abilities with Coffee Beans:
 
 ### 🛍️ Shop
 Spend beans on skins and gear that affect your stats:
-- Business Suit 🕴️, Space Suit 👨‍🚀
+
+![New skins: Code Wizard, Debug Ninja, Autobuild Mode, Alien Contractor, Night Shift, Principal Engineer](skins_showcase.png)
+
+- Business Suit 🕴️, Space Suit 👨‍🚀, Code Wizard 🧙, Debug Ninja 🥷, Autobuild Mode 🤖, Alien Contractor 👽, Night Shift 🧛, Principal Engineer 🤴
 - Ergo Chair (energy decays slower), Mech Keyboard (motivation decays slower)
+- Equipped skins show up everywhere your avatar does — the panel, and the exported Share Stats Card.
+
+### 📅 Activity Calendar
+A GitHub-contribution-graph-style heatmap on the main panel, showing your last year of DevGotchi activity at a glance — every XP-earning action (saves, commits, bug fixes, quests, boss defeats) lights up that day's cell. Drawn straight to canvas, no server, no separate tracking to opt into.
 
 ### 🔗 IDE Integrations
 - **Status Bar** — Level, mood emoji, and stat summary always visible.
@@ -141,6 +148,7 @@ See your teammates' progress without any server, accounts, or DevGotchi backend 
 - Turn it on in Settings (or `DevGotchi: Toggle Team Mode`). Only available for repos with more than one contributor.
 - Your progress gets written to `.devgotchi/team/<you>.json` inside the repo. DevGotchi never runs git commands that change anything — you commit and push it yourself, the same way you already share every other file.
 - A new 👥 Team button opens a view of everyone who's enabled it: name, level, and streak, pulled from whatever's currently on disk (as fresh as your last `git pull`).
+- **Team Raid Boss**: once there's more than one teammate, the Team view also shows a shared HP bar — the whole team's combined active error count. Clear it together (drive the combined count to 0) and the first person to check the Team view after that gets a bonus (+25 XP, +20 ☕), then a fresh fight starts.
 - Worth knowing: this makes your stats visible to anyone with access to the repo — it's an explicit opt-in, not a default.
 
 ---

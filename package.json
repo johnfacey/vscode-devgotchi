@@ -2,7 +2,7 @@
   "name": "vscode-devgotchi",
   "displayName": "DevGotchi - Your Virtual Developer",
   "description": "A cyberpunk RPG for your coding sessions. Level up, earn XP, and fight off burnout as a living developer avatar tracks your focus, energy, and motivation in real time.",
-  "version": "2.2.0",
+  "version": "2.4.0",
   "engines": {
     "vscode": "^1.80.0"
   },

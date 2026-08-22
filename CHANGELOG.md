@@ -4,6 +4,21 @@ All notable changes to the "DevGotchi" extension will be documented in this file
 
 ## [Unreleased]
 
+### Roadmap — ideas being considered, not yet built
+- **Raid Boss MVP**: show each teammate's bug-fix contribution during a Team Raid Boss fight, with an "MVP" tag for whoever cleared the most.
+- **Shareable Weekly Recap card**: export the Weekly Recap as a PNG, reusing the existing Share Stats Card canvas renderer.
+
+## [2.4.0] - 2026-08-17
+
+### Added
+- **Activity calendar**: a new 📅 card on the main panel shows a GitHub-contribution-graph-style heatmap of the last year of activity, drawn straight to canvas. Every XP-earning action (saves, commits, bug fixes, quests, boss defeats, focus sprints) lights up that day's cell.
+- **6 new cosmetic skins**: Code Wizard 🧙, Debug Ninja 🥷, Autobuild Mode 🤖, Alien Contractor 👽, Night Shift 🧛, and Principal Engineer 🤴 join Business Suit and Space Suit in the Coffee Shop — same coffee-bean economy, no new mechanics, just more ways to show off your avatar (including in exported Share Stats Cards).
+
+## [2.3.0] - 2026-08-17
+
+### Added
+- **Team Raid Boss**: the Team view now shows a shared HP bar equal to the whole team's combined active error count, synced the same way the rest of Team Mode already works (git commits, no server). Watch the HP bar drain as everyone fixes bugs — the first teammate to open the Team view after the combined count hits 0 (with 2+ contributors) gets a one-time bonus (+25 XP, +20 ☕) and a log entry, then a fresh fight starts from 0. Only appears once there's more than one teammate's snapshot to combine.
+
 ## [2.2.0] - 2026-08-03
 
 ### Added

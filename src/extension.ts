@@ -12,6 +12,12 @@ const SKILLS = [
 const SHOP_ITEMS = [
   { id: 'skin_suit', name: 'Business Suit', type: 'skin', description: 'Dress for success', cost: 150, emoji: '🕴️' },
   { id: 'skin_space', name: 'Space Suit', type: 'skin', description: 'Code in zero-g', cost: 300, emoji: '👨‍🚀' },
+  { id: 'skin_wizard', name: 'Code Wizard', type: 'skin', description: 'Cast spells, not just functions', cost: 200, emoji: '🧙' },
+  { id: 'skin_ninja', name: 'Debug Ninja', type: 'skin', description: 'Silent, deadly, zero console.logs', cost: 250, emoji: '🥷' },
+  { id: 'skin_robot', name: 'Autobuild Mode', type: 'skin', description: "CI/CD, but it's you", cost: 350, emoji: '🤖' },
+  { id: 'skin_alien', name: 'Alien Contractor', type: 'skin', description: 'Definitely not from this codebase', cost: 400, emoji: '👽' },
+  { id: 'skin_vampire', name: 'Night Shift', type: 'skin', description: 'Commits after midnight only', cost: 275, emoji: '🧛' },
+  { id: 'skin_royalty', name: 'Principal Engineer', type: 'skin', description: 'You approve your own PRs now', cost: 500, emoji: '🤴' },
   { id: 'furn_chair', name: 'Ergo Chair', type: 'furniture', description: 'Energy decays 15% slower', cost: 200 },
   { id: 'acc_keyboard', name: 'Mech Keyboard', type: 'accessory', description: 'Motivation decays 15% slower', cost: 250 }
 ];
@@ -95,6 +101,7 @@ interface ProgrammerStats {
   weeklyRecapSnapshot?: WeeklyRecapSnapshot; // Stat snapshot the next recap will diff against
   vacationMode?: boolean;     // When true, stats/streak/burnout are frozen — no decay, no daily-bonus gap
   vacationModeSince?: number; // Timestamp Vacation Mode was last turned on (0 = not currently on)
+  activityDates?: Record<string, number>; // "YYYY-MM-DD" -> XP-earning-event count that day, for the Activity calendar. Pruned to ~1 year.
 }
 
 interface WeeklyRecapSnapshot {
@@ -111,6 +118,8 @@ const FOCUS_SPRINT_BONUS_XP = 40;
 const FOCUS_SPRINT_BONUS_COFFEE = 25;
 const BUG_BOSS_DEFEAT_BONUS_XP = 30;
 const BUG_BOSS_DEFEAT_BONUS_COFFEE = 15;
+const TEAM_RAID_BOSS_DEFEAT_BONUS_XP = 25;
+const TEAM_RAID_BOSS_DEFEAT_BONUS_COFFEE = 20;
 const WEEKLY_RECAP_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
@@ -458,13 +467,10 @@ export function activate(context: vscode.ExtensionContext) {
 // sync with package.json's "version" — there's no build step wiring the two
 // together, so it's a manual pair (same tradeoff the codebase already makes
 // elsewhere, e.g. duplicated color constants across the webview template).
-const WHATS_NEW_VERSION = '2.2.0';
+const WHATS_NEW_VERSION = '2.4.0';
 const WHATS_NEW_ITEMS: { icon: string; title: string; desc: string }[] = [
-  { icon: '⚙️', title: 'Settings Panel', desc: 'Toggle Weekly Recap notifications, reduce achievement popups, and tune stat decay speed (Relaxed/Normal/Intense).' },
-  { icon: '💾', title: 'Progress Export/Import', desc: 'Back up your full save to a JSON file, or restore it on another machine — nothing leaves your computer unless you export it.' },
-  { icon: '🌴', title: 'Vacation Mode', desc: 'Freeze stat decay, burnout, and your streak while you\'re away. Turn it off when you\'re back and pick up right where you left off.' },
-  { icon: '👥', title: 'Team Mode', desc: "See teammates' level and streak — synced through your repo's own git commits, no server or accounts involved." },
-  { icon: '💬', title: 'Feedback Link', desc: 'A direct link in Settings to report bugs or suggest features.' }
+  { icon: '📅', title: 'Activity Calendar', desc: 'A GitHub-style heatmap of your last year of coding activity, right on the main panel.' },
+  { icon: '🧙', title: '6 New Skins', desc: 'Code Wizard, Debug Ninja, Autobuild Mode, Alien Contractor, Night Shift, and Principal Engineer join the Coffee Shop.' }
 ];
 
 /**
@@ -626,6 +632,10 @@ interface TeamMemberSnapshot {
   totalBugsFixed: number;
   totalFocusSprintsCompleted: number;
   lastActive: number;
+  // Live active-error count at the time this snapshot was last written.
+  // Optional so older snapshot files written before this field existed
+  // still parse fine — readers should treat a missing value as 0.
+  activeErrorCount?: number;
 }
 
 const TEAM_DIR_NAME = '.devgotchi/team';
@@ -784,7 +794,8 @@ class TeamManager {
       totalCommits: dev.totalCommits || 0,
       totalBugsFixed: dev.totalBugsFixed || 0,
       totalFocusSprintsCompleted: dev.totalFocusSprintsCompleted || 0,
-      lastActive: Date.now()
+      lastActive: Date.now(),
+      activeErrorCount: dev.activeErrorCount || 0
     };
     const fileUri = vscode.Uri.file(path.join(this.teamDir, `${slugifyEmail(identity.email)}.json`));
     await vscode.workspace.fs.writeFile(fileUri, Buffer.from(JSON.stringify(snapshot, null, 2), 'utf8'));
@@ -824,6 +835,42 @@ class TeamManager {
     }
     snapshots.sort((a, b) => (b.totalXpEarned - a.totalXpEarned) || (b.level - a.level));
     return snapshots;
+  }
+
+  /**
+   * The "Team Raid Boss" is just the sum of every teammate's active error
+   * count, as of their last-synced snapshot — a shared HP bar the whole
+   * team drains together, entirely derived from data that's already synced
+   * via git (no new sync mechanism needed). Tracks a peak HP (for the bar's
+   * fill %) and whether the boss was "up" last check, both in workspace
+   * state, so it can detect the moment the team collectively clears it —
+   * i.e. reward the transition, not just "HP happens to be 0 right now"
+   * (which would re-fire the reward on every single panel refresh).
+   */
+  async checkRaidBoss(snapshots: TeamMemberSnapshot[]): Promise<{ totalHp: number; peakHp: number; justCleared: boolean }> {
+    const totalHp = snapshots.reduce((sum, s) => sum + (s.activeErrorCount || 0), 0);
+    let peak = this.context.workspaceState.get<number>('teamRaidBossPeakHp', 0);
+    const wasUp = !!this.context.workspaceState.get('teamRaidBossUp');
+    let justCleared = false;
+
+    if (totalHp > peak) {
+      peak = totalHp;
+      await this.context.workspaceState.update('teamRaidBossPeakHp', peak);
+    }
+
+    if (totalHp > 0) {
+      await this.context.workspaceState.update('teamRaidBossUp', true);
+    } else if (wasUp && snapshots.length > 1) {
+      // Only counts as a real "clear" if there's actually more than one
+      // teammate contributing — a solo snapshot hitting 0 errors is just
+      // normal Bug Boss behavior, not a team achievement.
+      justCleared = true;
+      peak = 0;
+      await this.context.workspaceState.update('teamRaidBossUp', false);
+      await this.context.workspaceState.update('teamRaidBossPeakHp', 0);
+    }
+
+    return { totalHp, peakHp: peak, justCleared };
   }
 }
 
@@ -902,6 +949,7 @@ function normalizeDeveloper(saved: Partial<ProgrammerStats>): ProgrammerStats {
     lastWeeklyRecapAt: saved.lastWeeklyRecapAt === undefined ? Date.now() : saved.lastWeeklyRecapAt,
     vacationMode: saved.vacationMode === undefined ? false : saved.vacationMode,
     vacationModeSince: saved.vacationModeSince === undefined ? 0 : saved.vacationModeSince,
+    activityDates: saved.activityDates && typeof saved.activityDates === 'object' ? saved.activityDates : {},
     weeklyRecapSnapshot: saved.weeklyRecapSnapshot || {
       level,
       totalXpEarned,
@@ -1314,6 +1362,27 @@ class DeveloperManager {
   }
 
   /**
+   * Rewards the local player when TeamManager.checkRaidBoss() detects the
+   * whole team's combined error count just dropped to 0. Called once per
+   * clear (TeamManager already de-dupes the "just cleared" transition), so
+   * this doesn't need its own idempotency check.
+   */
+  teamRaidBossBonus(): { success: boolean; message: string } {
+    this.addXP(TEAM_RAID_BOSS_DEFEAT_BONUS_XP);
+    this.developer.coffee += TEAM_RAID_BOSS_DEFEAT_BONUS_COFFEE;
+    this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + TEAM_RAID_BOSS_DEFEAT_BONUS_COFFEE;
+    this.addLog(
+      `🐉 Team Raid Boss defeated! +${TEAM_RAID_BOSS_DEFEAT_BONUS_XP} XP, +${TEAM_RAID_BOSS_DEFEAT_BONUS_COFFEE} ☕`,
+      'achievement'
+    );
+    this.saveDeveloper();
+    return {
+      success: true,
+      message: `🐉 Team Raid Boss defeated! +${TEAM_RAID_BOSS_DEFEAT_BONUS_XP} XP, +${TEAM_RAID_BOSS_DEFEAT_BONUS_COFFEE} ☕ — nice work, team.`
+    };
+  }
+
+  /**
    * Starts a timed Focus Sprint. While active, XP earned is multiplied and
    * the Focus stat decays more slowly. Only one sprint can run at a time.
    */
@@ -1678,9 +1747,33 @@ class DeveloperManager {
   }
   
   /**
+   * Stamps today's date in activityDates, incrementing its event count.
+   * Called from addXP() since that's the single choke point every
+   * XP-earning action already passes through (saves, commits, bug fixes,
+   * quests, focus sprints, the Bug Boss and Team Raid Boss bonuses, etc.) —
+   * no need to instrument each call site separately. Pruned to the last
+   * ~370 days so a long-running save doesn't accumulate an unbounded object.
+   */
+  private recordDailyActivity() {
+    if (!this.developer.activityDates) this.developer.activityDates = {};
+    const key = new Date().toISOString().slice(0, 10);
+    this.developer.activityDates[key] = (this.developer.activityDates[key] || 0) + 1;
+
+    const keys = Object.keys(this.developer.activityDates);
+    if (keys.length > 400) {
+      keys.sort();
+      const excess = keys.length - 370;
+      for (let i = 0; i < excess; i++) {
+        delete this.developer.activityDates[keys[i]];
+      }
+    }
+  }
+
+  /**
    * Adds XP and handles leveling up logic.
    */
   private addXP(amount: number) {
+    this.recordDailyActivity();
     const sprintMultiplier = this.isFocusSprintActive() ? FOCUS_SPRINT_XP_MULTIPLIER : 1;
     const gained = Math.floor(amount * (1 + this.developer.energy / 100) * (1 + this.developer.focus / 100) * (1 + this.developer.motivation / 100) * sprintMultiplier);
     this.developer.xp += gained;
@@ -1856,12 +1949,20 @@ class DeveloperPanel {
       return;
     }
     const snapshots = await this.teamManager.readTeamSnapshots();
+    const raidBoss = await this.teamManager.checkRaidBoss(snapshots);
+    if (raidBoss.justCleared) {
+      const result = this.devManager.teamRaidBossBonus();
+      vscode.window.showInformationMessage(result.message);
+      this.updateDeveloper();
+    }
     this.panel.webview.postMessage({
       command: 'team-data',
       snapshots,
       enabled: this.teamManager.isEnabled(),
       available: this.teamManager.isAvailable(),
-      ownEmail: this.teamManager.getOwnEmail()
+      ownEmail: this.teamManager.getOwnEmail(),
+      raidBossHp: raidBoss.totalHp,
+      raidBossPeakHp: raidBoss.peakHp
     });
   }
 
@@ -2018,6 +2119,17 @@ class DeveloperPanel {
     .resource-icon { font-size: 18px; }
     .resource-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
     .resource-value { font-size: 16px; font-weight: bold; color: var(--neon-gold); }
+
+    /* ── ACTIVITY CALENDAR ── */
+    .calendar-card {
+      margin-top: 10px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 8px 12px;
+    }
+    .calendar-title { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+    #streakCalCanvas { width: 100%; height: 60px; display: block; }
     .resource-streak .resource-value { color: var(--neon-pink); }
 
     /* ── STATS PANEL ── */
@@ -2445,6 +2557,41 @@ class DeveloperPanel {
     .leaderboard-table th { color: var(--text-dim); font-size: 10px; letter-spacing: 2px; text-transform: uppercase; }
     .leaderboard-row.highlight { background: rgba(157,78,221,0.15); color: var(--neon-purple); font-weight: bold; }
 
+    /* ── TEAM RAID BOSS ── */
+    .raid-boss-card {
+      background: var(--bg-panel);
+      border: 1px solid #4a1010;
+      border-radius: 4px;
+      padding: 12px 14px;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .raid-boss-title {
+      font-size: 11px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--neon-red);
+      margin-bottom: 8px;
+    }
+    .raid-boss-track {
+      height: 10px;
+      background: #1a1a30;
+      border-radius: 1px;
+      overflow: hidden;
+      border: 1px solid #3a1010;
+    }
+    .raid-boss-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #7a0000, var(--neon-red));
+      box-shadow: 0 0 8px var(--neon-red);
+      transition: width 0.3s;
+    }
+    .raid-boss-hp-text { font-size: 10px; color: var(--text-dim); margin-top: 6px; }
+    .raid-boss-card.cleared { border-color: #006633; }
+    .raid-boss-card.cleared .raid-boss-title { color: var(--neon-green); }
+    .raid-boss-card.cleared .raid-boss-track { border-color: #006633; }
+    .raid-boss-card.cleared .raid-boss-fill { background: linear-gradient(90deg, #006633, var(--neon-green)); box-shadow: 0 0 8px var(--neon-green); }
+
     /* ── QUESTS ── */
     .quest-item {
       background: var(--bg-card);
@@ -2615,6 +2762,10 @@ class DeveloperPanel {
                 <div class="resource-value" id="streakVal">0 days</div>
               </div>
             </div>
+          </div>
+          <div class="calendar-card">
+            <div class="calendar-title">📅 Activity</div>
+            <canvas id="streakCalCanvas" width="400" height="60"></canvas>
           </div>
         </div>
 
@@ -2981,10 +3132,25 @@ class DeveloperPanel {
             el.innerHTML = '<p>No teammates found yet. Once you and a teammate both enable Team Mode and push/pull, you\\'ll show up here.</p>';
             return;
           }
-          let html = '<table class="leaderboard-table"><thead><tr><th>Dev</th><th>Lvl</th><th>Streak</th></tr></thead><tbody>';
+          let html = '';
+          // Raid Boss: only worth showing once there's more than one
+          // teammate contributing — a "team" of one is just the regular
+          // Bug Boss card already on the main panel.
+          if (data.snapshots.length > 1) {
+            const hp = data.raidBossHp || 0;
+            const peak = Math.max(data.raidBossPeakHp || 0, hp, 1);
+            const pct = hp === 0 ? 0 : Math.max(4, Math.round((hp / peak) * 100));
+            const cleared = hp === 0;
+            html += '<div class="raid-boss-card' + (cleared ? ' cleared' : '') + '">';
+            html += '<div class="raid-boss-title">' + (cleared ? '🎉 Raid Boss Defeated!' : '👹 Team Raid Boss') + '</div>';
+            html += '<div class="raid-boss-track"><div class="raid-boss-fill" style="width:' + pct + '%"></div></div>';
+            html += '<div class="raid-boss-hp-text">' + hp + ' combined bug' + (hp === 1 ? '' : 's') + ' across the team</div>';
+            html += '</div>';
+          }
+          html += '<table class="leaderboard-table"><thead><tr><th>Dev</th><th>Lvl</th><th>Streak</th><th>Bugs</th></tr></thead><tbody>';
           data.snapshots.forEach(s => {
             const isYou = data.ownEmail && s.email === data.ownEmail;
-            html += '<tr' + (isYou ? ' style="color:var(--neon-gold)"' : '') + '><td>' + (s.name || s.email) + (isYou ? ' (you)' : '') + '</td><td>' + s.level + '</td><td>🔥 ' + (s.streak || 0) + '</td></tr>';
+            html += '<tr' + (isYou ? ' style="color:var(--neon-gold)"' : '') + '><td>' + (s.name || s.email) + (isYou ? ' (you)' : '') + '</td><td>' + s.level + '</td><td>🔥 ' + (s.streak || 0) + '</td><td>' + (s.activeErrorCount || 0) + '</td></tr>';
           });
           html += '</tbody></table>';
           el.innerHTML = html;
@@ -3239,6 +3405,8 @@ class DeveloperPanel {
             // Redraw scene with current mood
             const sc = document.getElementById('sceneCanvas');
             if (sc) drawScene(sc, dev.mood);
+            const calC = document.getElementById('streakCalCanvas');
+            if (calC) drawStreakCalendar(calC, dev.activityDates);
             document.getElementById('levelBadge').textContent = 'LEVEL ' + dev.level;
 
             // XP
@@ -3639,6 +3807,44 @@ class DeveloperPanel {
           } else if (mood === 'burnt-out') {
             ctx.fillStyle = 'rgba(255,20,68,0.15)';
             ctx.fillRect(startX, startY, sW * P, sH * P);
+          }
+        }
+
+        // GitHub-contribution-graph-style heatmap of daily activity, drawn
+        // straight to a <canvas> the same way the pixel-art scene above is —
+        // no DOM grid of divs, just cells painted at fixed coordinates.
+        // Shows the last 53 weeks (~1 year), oldest on the left, today on
+        // the right, matching activityDates' ~370-day retention window.
+        function drawStreakCalendar(canvas, activityDates) {
+          const ctx = canvas.getContext('2d');
+          const W = canvas.width, H = canvas.height;
+          ctx.clearRect(0, 0, W, H);
+
+          const weeks = 53, cell = 6, gap = 1, pitch = cell + gap;
+          const gridW = weeks * pitch;
+          const offsetX = Math.max(2, (W - gridW) / 2);
+          const offsetY = 2;
+          const totalDays = weeks * 7;
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+
+          for (let i = 0; i < totalDays; i++) {
+            const d = new Date(today.getTime() - (totalDays - 1 - i) * 86400000);
+            const key = d.toISOString().slice(0, 10);
+            const count = (activityDates && activityDates[key]) || 0;
+            const col = Math.floor(i / 7);
+            const row = i % 7;
+            const x = offsetX + col * pitch;
+            const y = offsetY + row * pitch;
+
+            let color = 'rgba(255,255,255,0.06)';
+            if (count >= 15) color = '#e040fb';
+            else if (count >= 8) color = '#9d4edd';
+            else if (count >= 3) color = '#5a2fae';
+            else if (count >= 1) color = '#2a1a4a';
+
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, cell, cell);
           }
         }
 
