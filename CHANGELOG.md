@@ -6,7 +6,21 @@ All notable changes to the "DevGotchi" extension will be documented in this file
 
 ### Roadmap — ideas being considered, not yet built
 - **Raid Boss MVP**: show each teammate's bug-fix contribution during a Team Raid Boss fight, with an "MVP" tag for whoever cleared the most.
-- **Shareable Weekly Recap card**: export the Weekly Recap as a PNG, reusing the existing Share Stats Card canvas renderer.
+- **Seasonal Events**: limited-time cosmetics, quests, and boss fights tied to real-world seasons/holidays.
+
+## [2.5.0] - 2026-09-21
+
+### Added
+- **Character Classes**: pick a class the first time you open the panel — free, and grants a permanent passive bonus. Backend Mage 🔮 (+25% XP from commits), Frontend Rogue 🗡️ (+25% XP from saves), or DevOps Paladin 🛡️ (energy & motivation decay 15% slower). Your class retints the avatar's hoodie and chest glow in the panel scene. Respec anytime from the Shop for 200 ☕.
+- **Shareable Weekly Recap card**: the Share modal now has tabs for a 🕹️ Stats Card, a 📊 Weekly Recap card, and a 📋 Standup post. The Recap card renders a GitHub-contribution-graph-style heatmap of the past year with this week's XP/commits/bugs-fixed/sprints called out and the current 7-day column outlined. The weekly recap notification gets a "Share Recap" action that opens straight to it (`DevGotchi: Share Weekly Recap`).
+- **Standup generator**: a new 📋 Standup button in the Activity Log header turns today's log entries into a ready-to-paste "what I did today" post for Slack, with a one-click copy.
+- **🐦 Flex This**: one-click share for the Stats Card and Weekly Recap — copies a pre-written, hashtag-ready caption to the clipboard and immediately prompts to save the matching card image, so both halves of a social post are ready together.
+
+### Fixed
+- Toggling the background music off and back on repeatedly could go silent after the first toggle — the volume ramp-up only ever fired once per session instead of on every "on".
+
+### Changed
+- Marketplace listing: reworded display name/description and reordered keywords for discoverability.
 
 ## [2.4.0] - 2026-08-17
 
