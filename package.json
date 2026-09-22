@@ -1,8 +1,8 @@
 {
   "name": "vscode-devgotchi",
-  "displayName": "DevGotchi - Your Virtual Developer",
-  "description": "A cyberpunk RPG for your coding sessions. Level up, earn XP, and fight off burnout as a living developer avatar tracks your focus, energy, and motivation in real time.",
-  "version": "2.4.0",
+  "displayName": "DevGotchi — Gamify Coding: Pomodoro Timer, XP & Achievements",
+  "description": "Turn VS Code into a cyberpunk RPG. Your living developer avatar tracks focus, energy & motivation in real time — earn XP for every save and commit, run Pomodoro focus sprints, defeat the Bug Boss, and protect your streak. Free forever. No telemetry, no account.",
+  "version": "2.5.0",
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -35,6 +35,11 @@
       {
         "command": "devgotchi.exportStatsCard",
         "title": "Export Stats Card",
+        "category": "DevGotchi"
+      },
+      {
+        "command": "devgotchi.openWeeklyRecap",
+        "title": "Share Weekly Recap",
         "category": "DevGotchi"
       },
       {
@@ -71,6 +76,11 @@
         "command": "devgotchi.openTeamView",
         "title": "Open Team View",
         "category": "DevGotchi"
+      },
+      {
+        "command": "devgotchi.chooseClass",
+        "title": "Choose / Respec Class",
+        "category": "DevGotchi"
       }
     ]
   }, "maintainers": [
@@ -80,18 +90,7 @@
     "type": "git",
     "url": "https://github.com/johnfacey/vscode-devgotchi.git"
   },
-    "keywords": [
-    "tamagotchi",
-    "tamogotchi",
-    "gamification",
-    "productivity",
-    "rpg",
-    "focus",
-    "burnout",
-    "pomodoro",
-    "streak",
-    "motivational",
-    "game"
+    "keywords": ["pomodoro", "productivity", "gamification", "focus", "timer", "motivation", "tamagotchi", "achievements", "streak", "burnout", "rpg", "habit", "game", "deep work", "fun", "tamogotchi"
   ],
   "scripts": {
     "vscode:prepublish": "npm run compile",

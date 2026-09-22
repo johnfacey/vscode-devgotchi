@@ -9,6 +9,28 @@ const SKILLS = [
   { id: 'bug_slayer', name: 'Bug Slayer', description: 'Earn 2x XP when fixing bugs', cost: 100 }
 ];
 
+/**
+ * Character classes: a one-time (well, respec-able) identity pick that grants
+ * a themed passive bonus. Chosen for free the first time (prompted on
+ * activation once no class is set) and re-rollable afterward for coffee via
+ * the Shop — see DeveloperManager.chooseClass().
+ */
+interface CharacterClassDef {
+  id: string;
+  name: string;
+  emoji: string;
+  color: string; // Accent color used to retint the pixel-art scene (hoodie + glow) for this class
+  description: string;
+}
+
+const CLASSES: CharacterClassDef[] = [
+  { id: 'backend_mage', name: 'Backend Mage', emoji: '🔮', color: '#9d4edd', description: 'Git commits channel extra power: +25% XP from commits.' },
+  { id: 'frontend_rogue', name: 'Frontend Rogue', emoji: '🗡️', color: '#2dd4a5', description: 'Fast and precise: +25% XP from file saves.' },
+  { id: 'devops_paladin', name: 'DevOps Paladin', emoji: '🛡️', color: '#ffb020', description: 'Built for uptime: energy & motivation decay 15% slower.' }
+];
+
+const CLASS_RESPEC_COST = 200;
+
 const SHOP_ITEMS = [
   { id: 'skin_suit', name: 'Business Suit', type: 'skin', description: 'Dress for success', cost: 150, emoji: '🕴️' },
   { id: 'skin_space', name: 'Space Suit', type: 'skin', description: 'Code in zero-g', cost: 300, emoji: '👨‍🚀' },
@@ -102,6 +124,25 @@ interface ProgrammerStats {
   vacationMode?: boolean;     // When true, stats/streak/burnout are frozen — no decay, no daily-bonus gap
   vacationModeSince?: number; // Timestamp Vacation Mode was last turned on (0 = not currently on)
   activityDates?: Record<string, number>; // "YYYY-MM-DD" -> XP-earning-event count that day, for the Activity calendar. Pruned to ~1 year.
+  characterClass: string | null; // Chosen CLASSES id, or null if not yet picked
+  lastWeeklyRecap?: WeeklyRecapResult; // Most recent computed recap, kept around so it can be viewed/shared anytime (not just at notification time)
+}
+
+/**
+ * The delta computed by the most recent weekly recap — separate from
+ * WeeklyRecapSnapshot (which is lifetime totals used to compute the *next*
+ * delta). This is the human-readable "what happened this week" result,
+ * persisted so the Weekly Recap share card can be reopened anytime.
+ */
+interface WeeklyRecapResult {
+  generatedAt: number;
+  prevLevel: number;
+  newLevel: number;
+  xpGained: number;
+  commitsGained: number;
+  bugsGained: number;
+  sprintsGained: number;
+  streak: number;
 }
 
 interface WeeklyRecapSnapshot {
@@ -178,6 +219,16 @@ export function activate(context: vscode.ExtensionContext) {
   let teamManager: TeamManager | undefined;
 
   checkAndShowWhatsNew(context, hadExistingSave);
+
+  // Prompt for a class the first time (free) — including for existing saves
+  // that predate this feature, since they never got to pick one either. Runs
+  // fire-and-forget so it never blocks activation; if dismissed, it'll ask
+  // again next time VS Code starts (no class is ever silently assigned).
+  if (!devManager.getCharacterClass()) {
+    devManager.chooseClass().then(result => {
+      if (result.success) vscode.window.showInformationMessage(result.message);
+    });
+  }
 
   // Create and configure the status bar item
   const statusBarItem = vscode.window.createStatusBarItem(
@@ -270,6 +321,16 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('devgotchi.exportStatsCard', () => {
       DeveloperPanel.createOrShow(context.extensionUri, devManager, teamManager);
       DeveloperPanel.currentPanel?.openShareCard();
+    })
+  );
+
+  // Register command to open the Weekly Recap share card — used both from
+  // the Command Palette and as the "Share Recap" action on the weekly
+  // recap notification (see DeveloperManager.checkWeeklyRecap()).
+  context.subscriptions.push(
+    vscode.commands.registerCommand('devgotchi.openWeeklyRecap', () => {
+      DeveloperPanel.createOrShow(context.extensionUri, devManager, teamManager);
+      DeveloperPanel.currentPanel?.openWeeklyRecapShare();
     })
   );
 
@@ -375,6 +436,22 @@ export function activate(context: vscode.ExtensionContext) {
       } else {
         vscode.window.showWarningMessage(result.message);
       }
+      DeveloperPanel.currentPanel?.updateDeveloper();
+    })
+  );
+
+  // Register command to open the class picker/respec directly from the
+  // Command Palette (the Shop exposes the same action for a coffee cost
+  // once a class is already set).
+  context.subscriptions.push(
+    vscode.commands.registerCommand('devgotchi.chooseClass', async () => {
+      const result = await devManager.chooseClass();
+      if (result.success) {
+        vscode.window.showInformationMessage(result.message);
+      } else if (result.message !== 'Class selection cancelled.') {
+        vscode.window.showWarningMessage(result.message);
+      }
+      updateStatusBar();
       DeveloperPanel.currentPanel?.updateDeveloper();
     })
   );
@@ -950,6 +1027,8 @@ function normalizeDeveloper(saved: Partial<ProgrammerStats>): ProgrammerStats {
     vacationMode: saved.vacationMode === undefined ? false : saved.vacationMode,
     vacationModeSince: saved.vacationModeSince === undefined ? 0 : saved.vacationModeSince,
     activityDates: saved.activityDates && typeof saved.activityDates === 'object' ? saved.activityDates : {},
+    characterClass: typeof saved.characterClass === 'string' && CLASSES.some(c => c.id === saved.characterClass) ? saved.characterClass : null,
+    lastWeeklyRecap: saved.lastWeeklyRecap && typeof saved.lastWeeklyRecap === 'object' ? saved.lastWeeklyRecap : undefined,
     weeklyRecapSnapshot: saved.weeklyRecapSnapshot || {
       level,
       totalXpEarned,
@@ -1236,9 +1315,11 @@ class DeveloperManager {
 
     let energyDecay = 4 * decayMultiplier;
     if (this.developer.inventory.includes('furn_chair')) energyDecay *= 0.85;
+    if (this.developer.characterClass === 'devops_paladin') energyDecay *= 0.85; // Built for uptime
 
     let motivationDecay = 2 * decayMultiplier;
     if (this.developer.inventory.includes('acc_keyboard')) motivationDecay *= 0.85;
+    if (this.developer.characterClass === 'devops_paladin') motivationDecay *= 0.85; // Built for uptime
 
     this.developer.energy = Math.max(0, this.developer.energy - hoursPassed * energyDecay);
     this.developer.motivation = Math.max(0, this.developer.motivation - hoursPassed * motivationDecay);
@@ -1292,6 +1373,19 @@ class DeveloperManager {
     const levelsGained = this.developer.level - prev.level;
     const hadActivity = xpGained > 0 || commitsGained > 0 || bugsGained > 0 || sprintsGained > 0;
 
+    // Persisted regardless of activity, so the Weekly Recap share card
+    // always has something to show for "come back and share your week."
+    this.developer.lastWeeklyRecap = {
+      generatedAt: Date.now(),
+      prevLevel: prev.level,
+      newLevel: this.developer.level,
+      xpGained,
+      commitsGained,
+      bugsGained,
+      sprintsGained,
+      streak: this.developer.streak || 0
+    };
+
     if (hadActivity) {
       const parts: string[] = [];
       if (levelsGained > 0) parts.push(`Level ${prev.level} → ${this.developer.level}`);
@@ -1304,7 +1398,11 @@ class DeveloperManager {
       const summary = parts.join(' · ');
       this.addLog(`📊 Weekly recap: ${summary}`, 'event');
       if (this.settings.weeklyRecapEnabled) {
-        vscode.window.showInformationMessage(`📊 Your week with ${this.developer.name}: ${summary}`);
+        vscode.window.showInformationMessage(`📊 Your week with ${this.developer.name}: ${summary}`, 'Share Recap').then(choice => {
+          if (choice === 'Share Recap') {
+            vscode.commands.executeCommand('devgotchi.openWeeklyRecap');
+          }
+        });
       }
     }
 
@@ -1570,8 +1668,9 @@ class DeveloperManager {
     this.developer.motivation = Math.min(100, this.developer.motivation + 3);
     this.developer.coffee += 1;
     this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + 1;
-    this.addXP(3);
-    this.addLog(`📝 File saved  +3 XP  +1 ☕`, 'xp');
+    const saveXp = this.developer.characterClass === 'frontend_rogue' ? 4 : 3; // +25% XP from saves
+    this.addXP(saveXp);
+    this.addLog(`📝 File saved  +${saveXp} XP  +1 ☕`, 'xp');
     this.updateQuestProgress('save');
     this.checkAchievements();
     this.saveDeveloper();
@@ -1585,12 +1684,13 @@ class DeveloperManager {
     this.developer.coffee += 5;
     this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + 5;
     this.developer.totalCommits = (this.developer.totalCommits || 0) + 1;
-    this.addXP(50);
-    this.addLog(`📦 Git commit  +50 XP  +5 ☕`, 'xp');
+    const commitXp = this.developer.characterClass === 'backend_mage' ? 63 : 50; // +25% XP from commits
+    this.addXP(commitXp);
+    this.addLog(`📦 Git commit  +${commitXp} XP  +5 ☕`, 'xp');
     this.updateQuestProgress('commit');
     this.checkAchievements();
     this.saveDeveloper();
-    vscode.window.showInformationMessage(`Git Activity! +50 XP, +5 ☕`);
+    vscode.window.showInformationMessage(`Git Activity! +${commitXp} XP, +5 ☕`);
   }
 
   setInitialErrorCount(count: number) {
@@ -1676,6 +1776,34 @@ class DeveloperManager {
   completeTutorial() {
     this.developer.tutorialCompleted = true;
     this.saveDeveloper();
+  }
+
+  getCharacterClass(): string | null {
+    return this.developer.characterClass;
+  }
+
+  /**
+   * Opens a class picker. Free the first time (no class set yet); after
+   * that it's a paid respec (CLASS_RESPEC_COST coffee), surfaced as a Shop
+   * action. Coffee is only spent once a choice is actually confirmed, so
+   * dismissing the picker never costs anything.
+   */
+  async chooseClass(): Promise<{ success: boolean; message: string }> {
+    const isRespec = !!this.developer.characterClass;
+    if (isRespec && this.developer.coffee < CLASS_RESPEC_COST) {
+      return { success: false, message: `Need ${CLASS_RESPEC_COST} ☕ to respec your class.` };
+    }
+
+    const picked = await vscode.window.showQuickPick(
+      CLASSES.map(c => ({ label: `${c.emoji} ${c.name}`, description: c.description, id: c.id })),
+      { placeHolder: isRespec ? `Respec your class (-${CLASS_RESPEC_COST} ☕)` : 'Choose your class — grants a permanent passive bonus' }
+    );
+    if (!picked) return { success: false, message: 'Class selection cancelled.' };
+
+    if (isRespec) this.developer.coffee -= CLASS_RESPEC_COST;
+    this.developer.characterClass = picked.id;
+    this.saveDeveloper();
+    return { success: true, message: `${picked.label} it is!${isRespec ? ` (-${CLASS_RESPEC_COST} ☕)` : ''}` };
   }
 
   /**
@@ -1832,6 +1960,7 @@ class DeveloperPanel {
         case 'unlock-skill': this.updatePanel(this.devManager.unlockSkill(message.skillId)); break;
         case 'buy-item': this.updatePanel(this.devManager.buyItem(message.itemId)); break;
         case 'equip-item': this.updatePanel(this.devManager.equipItem(message.itemId)); break;
+        case 'choose-class': this.devManager.chooseClass().then(result => this.updatePanel(result)); break;
         case 'challenge-completed': {
           const coffee = this.devManager.challengeCompleted(message.score);
           this.panel.webview.postMessage({ command: 'challenge-result', result: { message: `Earned ${coffee} coffee beans!` } });
@@ -1843,10 +1972,13 @@ class DeveloperPanel {
         case 'cancel-focus-sprint': this.updatePanel(this.devManager.cancelFocusSprint()); break;
         case 'copy-text':
           vscode.env.clipboard.writeText(message.text);
-          this.panel.webview.postMessage({ command: 'action-result', result: { message: '📋 Copied! Paste it into your README or a post.' } });
+          this.panel.webview.postMessage({ command: 'action-result', result: { message: message.confirmMessage || '📋 Copied! Paste it into your README or a post.' } });
           break;
         case 'save-stats-image':
           this.saveStatsImage(message.dataUrl, message.suggestedName);
+          break;
+        case 'flex-share':
+          this.flexShare(message.dataUrl, message.suggestedName, message.caption);
           break;
         case 'save-settings': this.updatePanel(this.devManager.updateSettings(message.settings)); break;
         case 'export-progress': vscode.commands.executeCommand('devgotchi.exportProgress'); break;
@@ -1891,6 +2023,21 @@ class DeveloperPanel {
   }
 
   /**
+   * One-click "flex": copies a ready-to-post caption (with hashtags) to the
+   * clipboard, then immediately runs the same save flow as saveStatsImage()
+   * so the matching card image is one save-dialog away. VS Code's clipboard
+   * API only carries text, not images, so "copied together" means: caption
+   * on the clipboard, image saved to disk — the actual paste-into-a-tweet
+   * step still needs the two attached separately, but both halves are ready
+   * after a single click.
+   */
+  private async flexShare(dataUrl: string, suggestedName: string, caption: string) {
+    await vscode.env.clipboard.writeText(caption);
+    vscode.window.setStatusBarMessage('📋 Caption copied — now save the image to attach it!', 5000);
+    await this.saveStatsImage(dataUrl, suggestedName);
+  }
+
+  /**
    * Sends an action result (success/failure message) back to the webview.
    */
   private updatePanel(result: any) {
@@ -1919,6 +2066,14 @@ class DeveloperPanel {
    */
   public openShareCard() {
     this.panel.webview.postMessage({ command: 'open-share-modal' });
+  }
+
+  /**
+   * Tells the webview to open the Share modal on the Weekly Recap tab (used
+   * by the "Share Recap" action on the weekly recap notification).
+   */
+  public openWeeklyRecapShare() {
+    this.panel.webview.postMessage({ command: 'open-weekly-recap-modal' });
   }
 
   /**
@@ -2511,13 +2666,72 @@ class DeveloperPanel {
     .modal-close-btn:hover { border-color: var(--neon-purple); color: var(--text-main); }
 
     /* ── SHARE STATS CARD ── */
+    .share-tabs { display: flex; gap: 8px; margin-bottom: 10px; }
+    .share-tab {
+      flex: 1;
+      padding: 8px;
+      font-size: 12px;
+      font-family: inherit;
+      letter-spacing: 0.5px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      cursor: pointer;
+    }
+    .share-tab.active {
+      border-color: var(--neon-purple);
+      color: var(--text-main);
+      box-shadow: 0 0 8px rgba(157,78,221,0.3);
+    }
     .share-canvas-wrap {
       border: 1px solid var(--border);
       border-radius: 4px;
       overflow: hidden;
       line-height: 0;
     }
-    #shareCanvas { width: 100%; height: auto; display: block; }
+    #shareCanvas, #recapCanvas { width: 100%; height: auto; display: block; }
+    .flex-share-btn {
+      width: 100%;
+      padding: 12px;
+      font-size: 13px;
+      font-family: inherit;
+      letter-spacing: 1px;
+      background: linear-gradient(135deg, #00e5ff, #9d4edd);
+      border: none;
+      color: #08080f;
+      font-weight: bold;
+      box-shadow: 0 0 12px rgba(0,229,255,0.35);
+      cursor: pointer;
+    }
+    .standup-preview {
+      background: var(--bg-deep);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 14px;
+      font-family: inherit;
+      font-size: 12px;
+      line-height: 1.7;
+      color: var(--text-main);
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 340px;
+      overflow-y: auto;
+      margin: 0;
+    }
+    .log-panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .standup-btn {
+      padding: 5px 10px;
+      font-size: 10px;
+      letter-spacing: 0.5px;
+      font-family: inherit;
+      background: var(--bg-card);
+      border: 1px solid var(--neon-blue);
+      color: var(--neon-blue);
+      border-radius: 3px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .standup-btn:hover { background: rgba(0,229,255,0.12); }
 
     /* ── SKILL / SHOP ITEMS ── */
     .skill-item {
@@ -2731,7 +2945,7 @@ class DeveloperPanel {
           <!-- Name + Level row above scene -->
           <div class="profile-bar">
             <div>
-              <div class="dev-role">Junior Developer</div>
+              <div class="dev-role" id="devClassLabel">Junior Developer</div>
               <div id="devName" class="dev-name" onclick="showRenameModal()" title="Click to rename">Dev</div>
             </div>
             <div style="text-align:right; flex-shrink:0;">
@@ -2947,7 +3161,10 @@ class DeveloperPanel {
 
       <!-- ── ACTIVITY LOG ── -->
       <div id="logPanel" style="display:none; background:var(--bg-panel); border:1px solid var(--border); border-top:2px solid var(--neon-blue); border-radius:4px; padding:14px; margin-bottom:12px;">
-        <div class="section-title" style="color:var(--neon-blue);">◈ Activity Log</div>
+        <div class="log-panel-header">
+          <div class="section-title" style="color:var(--neon-blue); margin-bottom:0; border-bottom:none; padding-bottom:0;">◈ Activity Log</div>
+          <button class="standup-btn" onclick="showShareModal('standup')" title="Turn today's log into a Slack standup">📋 Standup</button>
+        </div>
         <div id="logEntries" style="max-height:180px; overflow-y:auto; font-size:11px; line-height:1.8;"></div>
       </div>
 
@@ -2964,10 +3181,25 @@ class DeveloperPanel {
       <div id="shareModal" class="modal">
         <div class="modal-content" style="max-width:640px">
           <h3>📤 Share Your Stats</h3>
-          <div class="share-canvas-wrap">
-            <canvas id="shareCanvas" width="1200" height="630"></canvas>
+          <div class="share-tabs">
+            <button id="shareTabStats" class="share-tab active" onclick="switchShareTab('stats')">🕹️ Stats Card</button>
+            <button id="shareTabRecap" class="share-tab" onclick="switchShareTab('recap')">📊 Weekly Recap</button>
+            <button id="shareTabStandup" class="share-tab" onclick="switchShareTab('standup')">📋 Standup</button>
           </div>
-          <div class="modal-buttons" style="margin-top:12px;">
+          <div class="share-canvas-wrap" id="shareCanvasWrap">
+            <canvas id="shareCanvas" width="1200" height="630"></canvas>
+            <canvas id="recapCanvas" width="1200" height="630" style="display:none"></canvas>
+          </div>
+          <div id="standupWrap" style="display:none;">
+            <pre id="standupPreview" class="standup-preview"></pre>
+          </div>
+          <div class="modal-buttons" id="flexButtonRow" style="margin-top:12px;">
+            <button class="flex-share-btn" onclick="flexShare()">🐦 FLEX THIS — COPY CAPTION + SAVE IMAGE</button>
+          </div>
+          <div class="modal-buttons" id="standupButtonRow" style="margin-top:12px; display:none;">
+            <button class="flex-share-btn" onclick="copyStandup()">📋 COPY FOR SLACK</button>
+          </div>
+          <div class="modal-buttons" id="statsExtraButtons" style="margin-top:8px;">
             <button onclick="copyStatsMarkdown()">📋 COPY AS MARKDOWN</button>
             <button onclick="saveStatsImage()">🖼️ SAVE AS IMAGE</button>
           </div>
@@ -3059,6 +3291,8 @@ class DeveloperPanel {
         let teamEnabled = false;
         const SKILLS = ${JSON.stringify(SKILLS)};
         const SHOP_ITEMS = ${JSON.stringify(SHOP_ITEMS)};
+        const CLASSES = ${JSON.stringify(CLASSES)};
+        const CLASS_RESPEC_COST = ${CLASS_RESPEC_COST};
 
         // ── SETTINGS ──
         function showSettingsModal() {
@@ -3244,10 +3478,24 @@ class DeveloperPanel {
         }
         function closeShopModal() { document.getElementById('shopModal').classList.remove('active'); }
 
+        function chooseClass() {
+          vscode.postMessage({ command: 'choose-class' });
+        }
+
         function renderShop() {
           const list = document.getElementById('shopList');
           list.innerHTML = '';
           if (!currentDev) return;
+
+          const classInfo = CLASSES.find(c => c.id === currentDev.characterClass);
+          const classCostHtml = currentDev.coffee >= CLASS_RESPEC_COST ? CLASS_RESPEC_COST : '<span class="cant-afford">' + CLASS_RESPEC_COST + '</span>';
+          const classBtnHtml = classInfo
+            ? '<button class="skill-btn" onclick="chooseClass()">RESPEC (' + classCostHtml + '☕)</button>'
+            : '<button class="skill-btn" onclick="chooseClass()">CHOOSE (FREE)</button>';
+          list.innerHTML += '<div class="skill-item"><div class="skill-info"><span class="skill-name">'
+            + (classInfo ? classInfo.emoji + ' ' + classInfo.name : '🎭 No Class')
+            + '</span><span class="skill-desc">' + (classInfo ? classInfo.description : 'Pick a class for a permanent passive bonus.')
+            + '</span></div><div>' + classBtnHtml + '</div></div>';
 
           SHOP_ITEMS.forEach(item => {
             const owned = currentDev.inventory && currentDev.inventory.includes(item.id);
@@ -3401,10 +3649,12 @@ class DeveloperPanel {
             document.getElementById('coffeeVal').textContent = dev.coffee;
             document.getElementById('streakVal').textContent = (dev.streak || 0) + ' days';
             document.getElementById('devName').textContent = dev.name;
+            const headerClassInfo = CLASSES.find(c => c.id === dev.characterClass);
+            document.getElementById('devClassLabel').textContent = headerClassInfo ? (headerClassInfo.emoji + ' ' + headerClassInfo.name) : 'Unclassed Developer';
             document.getElementById('devAvatar').textContent = dev.mood === 'sleeping' ? '💤' : dev.role;
             // Redraw scene with current mood
             const sc = document.getElementById('sceneCanvas');
-            if (sc) drawScene(sc, dev.mood);
+            if (sc) drawScene(sc, dev.mood, dev.characterClass);
             const calC = document.getElementById('streakCalCanvas');
             if (calC) drawStreakCalendar(calC, dev.activityDates);
             document.getElementById('levelBadge').textContent = 'LEVEL ' + dev.level;
@@ -3489,6 +3739,9 @@ class DeveloperPanel {
           }
           if (m.command === 'open-share-modal') {
             showShareModal();
+          }
+          if (m.command === 'open-weekly-recap-modal') {
+            showShareModal('recap');
           }
           if (m.command === 'open-settings-modal') {
             if (m.settings) currentSettings = m.settings;
@@ -3739,16 +3992,27 @@ class DeveloperPanel {
           });
         }
 
-        function drawCharacter(ctx, cx, groundY, mood) {
+        // Per-class recolor of the same sprite/scene art (hoodie + glow only —
+        // shape and everything else stays identical). Keyed by CLASSES id;
+        // falls back to the original purple palette when no class is set.
+        const CLASS_THEME = {
+          backend_mage:   { hoodie: '#2d1b60', hoodieLight: '#3d287a', glow: '157,78,221' },
+          frontend_rogue: { hoodie: '#0f3d33', hoodieLight: '#15594a', glow: '45,212,165' },
+          devops_paladin: { hoodie: '#4a3410', hoodieLight: '#6b4b16', glow: '255,176,32' }
+        };
+        const DEFAULT_CLASS_THEME = CLASS_THEME.backend_mage;
+
+        function drawCharacter(ctx, cx, groundY, mood, characterClass) {
           const P = 3; // canvas pixels per logical pixel
+          const theme = CLASS_THEME[characterClass] || DEFAULT_CLASS_THEME;
           // Colour palette
           const C = {
             ' ': null,
             'H': '#1a1a2e', 'h': '#252550',           // hair
             'S': '#b87048', 's': '#ca8860',            // skin
             'e': '#080818',                             // eyes/dark detail
-            'C': '#2d1b60', 'c': '#3d287a',            // hoodie
-            'G': '#9d4edd',                             // chest glow pixel
+            'C': theme.hoodie, 'c': theme.hoodieLight, // hoodie (class-colored)
+            'G': 'rgb(' + theme.glow + ')',             // chest glow pixel
             'L': '#231555', 'l': '#2e1c72',            // legs
           };
           const sprite = [
@@ -3787,8 +4051,8 @@ class DeveloperPanel {
           // Chest glow
           const gx = cx, gy = startY + 10 * P;
           const cg = ctx.createRadialGradient(gx, gy, 0, gx, gy, 22);
-          cg.addColorStop(0, 'rgba(157,78,221,0.4)');
-          cg.addColorStop(1, 'rgba(157,78,221,0)');
+          cg.addColorStop(0, 'rgba(' + theme.glow + ',0.4)');
+          cg.addColorStop(1, 'rgba(' + theme.glow + ',0)');
           ctx.fillStyle = cg;
           ctx.fillRect(gx - 26, gy - 20, 52, 44);
 
@@ -3848,10 +4112,11 @@ class DeveloperPanel {
           }
         }
 
-        function drawScene(canvas, mood) {
+        function drawScene(canvas, mood, characterClass) {
           const ctx = canvas.getContext('2d');
           ctx.imageSmoothingEnabled = false;
           const W = canvas.width, H = canvas.height;
+          const theme = CLASS_THEME[characterClass] || DEFAULT_CLASS_THEME;
           const floorY = 148;
 
           // Background
@@ -3934,12 +4199,12 @@ class DeveloperPanel {
           ['コ','ー','ド','は','武','道','だ'].forEach((ch, i) => ctx.fillText(ch, W - 17, 22 + i * 16));
 
           // Character
-          drawCharacter(ctx, W / 2, floorY, mood);
+          drawCharacter(ctx, W / 2, floorY, mood, characterClass);
 
-          // Ground glow under character
+          // Ground glow under character (class-colored)
           const gg = ctx.createRadialGradient(W/2, floorY + 10, 2, W/2, floorY + 10, 70);
-          gg.addColorStop(0, 'rgba(110,35,200,0.32)');
-          gg.addColorStop(1, 'rgba(110,35,200,0)');
+          gg.addColorStop(0, 'rgba(' + theme.glow + ',0.32)');
+          gg.addColorStop(1, 'rgba(' + theme.glow + ',0)');
           ctx.fillStyle = gg;
           ctx.fillRect(W/2 - 80, floorY - 8, 160, 75);
         }
@@ -3991,22 +4256,39 @@ class DeveloperPanel {
           return 'Junior Developer';
         }
 
-        function showShareModal() {
+        let currentShareTab = 'stats';
+
+        function showShareModal(tab) {
           document.getElementById('shareModal').classList.add('active');
-          renderShareCard();
+          switchShareTab(tab || 'stats');
         }
         function closeShareModal() {
           document.getElementById('shareModal').classList.remove('active');
         }
 
-        function renderShareCard() {
-          if (!currentDev) return;
-          const dev = currentDev;
-          const canvas = document.getElementById('shareCanvas');
-          const ctx = canvas.getContext('2d');
-          const W = canvas.width, H = canvas.height;
+        function switchShareTab(tab) {
+          currentShareTab = tab;
+          document.getElementById('shareTabStats').classList.toggle('active', tab === 'stats');
+          document.getElementById('shareTabRecap').classList.toggle('active', tab === 'recap');
+          document.getElementById('shareTabStandup').classList.toggle('active', tab === 'standup');
 
-          // Background
+          document.getElementById('shareCanvasWrap').style.display = tab === 'standup' ? 'none' : 'block';
+          document.getElementById('shareCanvas').style.display = tab === 'stats' ? 'block' : 'none';
+          document.getElementById('recapCanvas').style.display = tab === 'recap' ? 'block' : 'none';
+          document.getElementById('standupWrap').style.display = tab === 'standup' ? 'block' : 'none';
+
+          document.getElementById('flexButtonRow').style.display = tab === 'standup' ? 'none' : 'flex';
+          document.getElementById('standupButtonRow').style.display = tab === 'standup' ? 'flex' : 'none';
+          document.getElementById('statsExtraButtons').style.display = tab === 'standup' ? 'none' : 'flex';
+
+          if (tab === 'recap') renderRecapCard();
+          else if (tab === 'standup') renderStandupPreview();
+          else renderShareCard();
+        }
+
+        // Shared background/border chrome for both the Stats Card and the
+        // Weekly Recap card — keeps the two share images visually matched.
+        function drawCardChrome(ctx, W, H, subtitle) {
           ctx.save();
           roundRect(ctx, 0, 0, W, H, 18);
           ctx.clip();
@@ -4037,7 +4319,17 @@ class DeveloperPanel {
           ctx.fillText('DEVGOTCHI', 56, 78);
           ctx.fillStyle = '#00e5ff';
           ctx.font = '14px "Share Tech Mono", monospace';
-          ctx.fillText('CODE IS A MARTIAL ART', 58, 100);
+          ctx.fillText(subtitle, 58, 100);
+        }
+
+        function renderShareCard() {
+          if (!currentDev) return;
+          const dev = currentDev;
+          const canvas = document.getElementById('shareCanvas');
+          const ctx = canvas.getContext('2d');
+          const W = canvas.width, H = canvas.height;
+
+          drawCardChrome(ctx, W, H, 'CODE IS A MARTIAL ART');
 
           // Mood badge (top right)
           ctx.textAlign = 'right';
@@ -4106,9 +4398,14 @@ class DeveloperPanel {
             ['⏱️', String(dev.totalFocusSprintsCompleted || 0), 'SPRINTS'],
             ['🏅', earned + '/' + totalAch, 'AWARDS']
           ];
-          const tileY = 380, tileH = 150;
+          drawTileRow(ctx, W, tiles, 380, 150);
+          drawCardFooter(ctx, W, H);
+        }
+
+        // Shared tile-row renderer for both share cards (stat tiles / recap tiles).
+        function drawTileRow(ctx, W, tiles, tileY, tileH) {
           const tileGap = 14;
-          const tileW = (W - 112 - tileGap * 4) / 5;
+          const tileW = (W - 112 - tileGap * (tiles.length - 1)) / tiles.length;
           tiles.forEach((t, i) => {
             const tx = 56 + i * (tileW + tileGap);
             roundRect(ctx, tx, tileY, tileW, tileH, 8);
@@ -4127,12 +4424,194 @@ class DeveloperPanel {
             ctx.font = '10px "Share Tech Mono", monospace';
             ctx.fillText(t[2], tx + tileW/2, tileY + 118);
           });
+        }
 
-          // Footer
+        function drawCardFooter(ctx, W, H) {
           ctx.textAlign = 'center';
           ctx.fillStyle = '#5a5878';
           ctx.font = '13px "Share Tech Mono", monospace';
           ctx.fillText('Built with DevGotchi — a virtual developer for VS Code', W/2, H - 34);
+        }
+
+        // Contribution-graph-style heatmap (GitHub-style) for the recap card —
+        // full past year, with the current 7-day week outlined so it reads as
+        // "here's this week, in context."
+        function drawContributionGraph(ctx, x, y, width, activityDates) {
+          const weeks = 53;
+          const pitch = width / weeks;
+          const gap = Math.max(1, pitch * 0.18);
+          const cell = pitch - gap;
+          const totalDays = weeks * 7;
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+
+          for (let i = 0; i < totalDays; i++) {
+            const d = new Date(today.getTime() - (totalDays - 1 - i) * 86400000);
+            const key = d.toISOString().slice(0, 10);
+            const count = (activityDates && activityDates[key]) || 0;
+            const col = Math.floor(i / 7);
+            const row = i % 7;
+            const cx = x + col * pitch;
+            const cy = y + row * pitch;
+
+            let color = 'rgba(255,255,255,0.06)';
+            if (count >= 15) color = '#e040fb';
+            else if (count >= 8) color = '#9d4edd';
+            else if (count >= 3) color = '#5a2fae';
+            else if (count >= 1) color = '#2a1a4a';
+
+            ctx.fillStyle = color;
+            ctx.fillRect(cx, cy, cell, cell);
+          }
+
+          // Outline the current week (rightmost column) in cyan
+          const hx = x + (weeks - 1) * pitch - gap * 0.5;
+          const hy = y - gap * 0.5;
+          ctx.strokeStyle = '#00e5ff';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(hx, hy, pitch, pitch * 7);
+        }
+
+        function renderRecapCard() {
+          if (!currentDev) return;
+          const dev = currentDev;
+          const canvas = document.getElementById('recapCanvas');
+          const ctx = canvas.getContext('2d');
+          const W = canvas.width, H = canvas.height;
+
+          drawCardChrome(ctx, W, H, 'WEEKLY RECAP');
+
+          // Mood badge (top right)
+          ctx.textAlign = 'right';
+          ctx.font = '46px sans-serif';
+          ctx.fillText(dev.mood === 'sleeping' ? '💤' : (dev.role || '👨‍💻'), W-56, 82);
+
+          const r = dev.lastWeeklyRecap;
+
+          // Dev name + label
+          ctx.textAlign = 'left';
+          ctx.fillStyle = '#7070a0';
+          ctx.font = '16px "Share Tech Mono", monospace';
+          ctx.fillText('THIS WEEK IN CODE', 58, 158);
+          ctx.fillStyle = '#e8e8ff';
+          ctx.font = 'bold 44px "Share Tech Mono", monospace';
+          ctx.fillText(dev.name || 'Dev', 56, 206);
+
+          // Level badge (top right)
+          ctx.fillStyle = '#ffd740';
+          ctx.font = 'bold 22px "Share Tech Mono", monospace';
+          ctx.textAlign = 'right';
+          const levelLabel = (r && r.newLevel > r.prevLevel) ? ('LEVEL ' + r.prevLevel + ' → ' + r.newLevel) : ('LEVEL ' + dev.level);
+          ctx.fillText(levelLabel, W-56, 158);
+
+          if (!r) {
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#7070a0';
+            ctx.font = '18px "Share Tech Mono", monospace';
+            ctx.fillText('Your first Weekly Recap unlocks after 7 days of tracked activity.', W/2, 320);
+            drawCardFooter(ctx, W, H);
+            return;
+          }
+
+          // Tiles: what changed this week
+          const tiles = [
+            ['⚡', '+' + r.xpGained, 'XP GAINED'],
+            ['📦', String(r.commitsGained), 'COMMITS'],
+            ['🐛', String(r.bugsGained), 'BUGS FIXED'],
+            ['⏱️', String(r.sprintsGained), 'SPRINTS']
+          ];
+          drawTileRow(ctx, W, tiles, 230, 130);
+
+          ctx.textAlign = 'left';
+          ctx.fillStyle = '#7070a0';
+          ctx.font = '13px "Share Tech Mono", monospace';
+          ctx.fillText('🔥 ' + (r.streak || 0) + '-day streak', 56, 400);
+
+          ctx.fillStyle = '#7070a0';
+          ctx.font = '11px "Share Tech Mono", monospace';
+          ctx.fillText('PAST 12 MONTHS', 56, 428);
+          drawContributionGraph(ctx, 56, 440, W - 112, dev.activityDates);
+
+          drawCardFooter(ctx, W, H);
+        }
+
+        // ── STANDUP GENERATOR ─────────────────────────────────────────────
+        // Turns today's Activity Log into a "what I did today" post for
+        // Slack — one click, no re-typing the log by hand. The dev's avatar
+        // emoji rides along at the top of the post.
+        function getTodayLogEntries() {
+          const dev = currentDev;
+          if (!dev || !dev.activityLog) return [];
+          const now = new Date();
+          const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+          return dev.activityLog.filter(e => e.timestamp >= startOfDay);
+        }
+
+        function buildStandupText() {
+          const dev = currentDev;
+          const entries = getTodayLogEntries();
+
+          let commits = 0, bugsFixed = 0, sprints = 0, saves = 0, bossesDefeated = 0;
+          let leveledTo = null;
+          const achievements = [];
+
+          entries.forEach(e => {
+            const m = e.message;
+            if (m.indexOf('📦 Git commit') === 0) {
+              commits++;
+            } else if (m.indexOf('🐛 Fixed') === 0) {
+              const match = m.match(/Fixed (\\d+) bug/);
+              bugsFixed += match ? parseInt(match[1], 10) : 1;
+            } else if (m.indexOf('🎯 Focus Sprint complete') === 0) {
+              sprints++;
+            } else if (m.indexOf('📝 File saved') === 0) {
+              saves++;
+            } else if (m.indexOf('🎉 LEVEL UP') === 0) {
+              const match = m.match(/Level (\\d+)/);
+              if (match) leveledTo = parseInt(match[1], 10);
+            } else if (m.indexOf('Achievement unlocked:') === 0) {
+              achievements.push(m.replace('Achievement unlocked: ', ''));
+            } else if (m.indexOf('👾 Bug Boss defeated') === 0 || m.indexOf('🐉 Team Raid Boss defeated') === 0) {
+              bossesDefeated++;
+            }
+          });
+
+          const bullets = [];
+          if (commits > 0) bullets.push('📦 Shipped ' + commits + ' commit' + (commits === 1 ? '' : 's'));
+          if (bugsFixed > 0) bullets.push('🐛 Fixed ' + bugsFixed + ' bug' + (bugsFixed === 1 ? '' : 's'));
+          if (sprints > 0) bullets.push('⏱️ Ran ' + sprints + ' focus sprint' + (sprints === 1 ? '' : 's'));
+          if (bossesDefeated > 0) bullets.push('👾 Cleared ' + bossesDefeated + ' bug boss fight' + (bossesDefeated === 1 ? '' : 's'));
+          if (leveledTo) bullets.push('🎉 Leveled up to Level ' + leveledTo);
+          if (achievements.length) bullets.push('🏅 Unlocked: ' + achievements.join(', '));
+          if (saves > 0) bullets.push('📝 ' + saves + ' file save' + (saves === 1 ? '' : 's'));
+
+          if (bullets.length === 0) {
+            bullets.push('🌱 Quiet day in the editor — holding at a ' + (dev.streak || 0) + '-day streak.');
+          }
+
+          const avatar = dev.mood === 'sleeping' ? '💤' : (dev.role || '👨‍💻');
+          const dateStr = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+
+          const lines = [
+            avatar + ' *Standup — ' + (dev.name || 'Dev') + '* — ' + dateStr,
+            '',
+            ...bullets.map(b => '• ' + b),
+            '',
+            '🔥 ' + (dev.streak || 0) + '-day streak · Lvl ' + dev.level,
+            '_Generated with DevGotchi_'
+          ];
+          return lines.join('\\n');
+        }
+
+        function renderStandupPreview() {
+          const el = document.getElementById('standupPreview');
+          if (!el) return;
+          el.textContent = currentDev ? buildStandupText() : '';
+        }
+
+        function copyStandup() {
+          if (!currentDev) return;
+          vscode.postMessage({ command: 'copy-text', text: buildStandupText(), confirmMessage: '📋 Standup copied — paste it into Slack!' });
         }
 
         function buildStatsMarkdown() {
@@ -4160,13 +4639,63 @@ class DeveloperPanel {
           vscode.postMessage({ command: 'copy-text', text: buildStatsMarkdown() });
         }
 
-        function saveStatsImage() {
-          if (!currentDev) return;
-          renderShareCard();
-          const canvas = document.getElementById('shareCanvas');
+        // Renders whichever card is on-screen and returns { dataUrl, suggestedName }.
+        function renderActiveShareCanvas() {
+          const isRecap = currentShareTab === 'recap';
+          if (isRecap) renderRecapCard(); else renderShareCard();
+          const canvas = document.getElementById(isRecap ? 'recapCanvas' : 'shareCanvas');
           const dataUrl = canvas.toDataURL('image/png');
           const safeName = (currentDev.name || 'dev').toLowerCase().replace(/[^a-z0-9]+/g, '-');
-          vscode.postMessage({ command: 'save-stats-image', dataUrl, suggestedName: 'devgotchi-' + safeName + '.png' });
+          const suggestedName = 'devgotchi-' + (isRecap ? 'recap-' : '') + safeName + '.png';
+          return { dataUrl, suggestedName };
+        }
+
+        function saveStatsImage() {
+          if (!currentDev) return;
+          const { dataUrl, suggestedName } = renderActiveShareCanvas();
+          vscode.postMessage({ command: 'save-stats-image', dataUrl, suggestedName });
+        }
+
+        // Pre-written, hashtag-ready captions — every share is free marketing,
+        // so make the copy-paste path a single click (see flexShare()).
+        function buildStatsCaption() {
+          const dev = currentDev;
+          return [
+            '🕹️ Level ' + dev.level + ' ' + getTitleForLevel(dev.level) + ' — 🔥 ' + (dev.streak || 0) + '-day coding streak',
+            '📦 ' + (dev.totalCommits || 0) + ' commits · 🐛 ' + (dev.totalBugsFixed || 0) + ' bugs squashed · ⏱️ ' + (dev.totalFocusSprintsCompleted || 0) + ' focus sprints',
+            '',
+            'Gamifying my coding sessions with DevGotchi 🧙',
+            '',
+            '#DevGotchi #100DaysOfCode #BuildInPublic #CodeNewbie #DeveloperLife'
+          ].join('\\n');
+        }
+
+        function buildRecapCaption() {
+          const dev = currentDev;
+          const r = dev.lastWeeklyRecap;
+          if (!r) return buildStatsCaption();
+          const leveledUp = r.newLevel > r.prevLevel;
+          return [
+            '📊 My week in code, courtesy of DevGotchi:',
+            (leveledUp ? '⬆️ Level ' + r.prevLevel + ' → ' + r.newLevel + ' · ' : '') + '+' + r.xpGained + ' XP',
+            '📦 ' + r.commitsGained + ' commits · 🐛 ' + r.bugsGained + ' bugs fixed · ⏱️ ' + r.sprintsGained + ' focus sprints',
+            '🔥 ' + (r.streak || 0) + '-day streak',
+            '',
+            '#DevGotchi #BuildInPublic #100DaysOfCode #WeeklyRecap #DeveloperLife'
+          ].join('\\n');
+        }
+
+        function buildFlexCaption() {
+          return currentShareTab === 'recap' ? buildRecapCaption() : buildStatsCaption();
+        }
+
+        // One-click "flex": copies a ready-to-post caption to the clipboard
+        // and immediately prompts to save the matching card image, so both
+        // halves of the post are one click away from being pasted/attached.
+        function flexShare() {
+          if (!currentDev) return;
+          const { dataUrl, suggestedName } = renderActiveShareCanvas();
+          vscode.postMessage({ command: 'flex-share', dataUrl, suggestedName, caption: buildFlexCaption() });
         }
 
         // ── ACTIVITY LOG ──────────────────────────────────────────────────
@@ -4211,7 +4740,6 @@ class DeveloperPanel {
 
           masterGain = audioCtx.createGain();
           masterGain.gain.setValueAtTime(0.0, audioCtx.currentTime);
-          masterGain.gain.linearRampToValueAtTime(0.72, audioCtx.currentTime + 2.0);
           masterGain.connect(audioCtx.destination);
         }
 
@@ -4370,6 +4898,15 @@ class DeveloperPanel {
           if (!musicPlaying) {
             initAudio();
             if (audioCtx.state === 'suspended') audioCtx.resume();
+            // Always re-ramp volume up here, not just on first init — a
+            // prior OFF toggle ramps this down to 0, and since initAudio()
+            // no-ops once audioCtx exists, without this the ramp-up would
+            // only ever happen once and every subsequent "on" would be
+            // silent (state says playing, oscillators scheduled, but
+            // masterGain stuck at 0 from the last fade-out).
+            masterGain.gain.cancelScheduledValues(audioCtx.currentTime);
+            masterGain.gain.setValueAtTime(masterGain.gain.value, audioCtx.currentTime);
+            masterGain.gain.linearRampToValueAtTime(0.72, audioCtx.currentTime + 1.0);
             musicPlaying = true;
             nextBarTime  = audioCtx.currentTime + 0.1;
             runSequencer();
@@ -4380,6 +4917,8 @@ class DeveloperPanel {
             musicPlaying = false;
             clearTimeout(sequencerTimeout);
             if (masterGain) {
+              masterGain.gain.cancelScheduledValues(audioCtx.currentTime);
+              masterGain.gain.setValueAtTime(masterGain.gain.value, audioCtx.currentTime);
               masterGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.8);
             }
             btn.classList.remove('music-on');

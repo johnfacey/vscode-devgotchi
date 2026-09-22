@@ -19,6 +19,17 @@ Save files and push commits to earn XP and Coffee Beans. Let your stats decay an
 - **Coffee Economy** — Coffee Beans are your currency. Earn them by coding, spend them on upgrades.
 - **Mood System** — Your developer's mood shifts: 🚀 Productive → 😰 Stressed → 😴 Tired → 💀 Burnt Out.
 
+### 🧙 Character Classes
+Pick a class the first time you open the panel — it's free, and it sets a permanent passive bonus:
+
+| Class | Passive |
+| :--- | :--- |
+| 🔮 Backend Mage | Git commits channel extra power: +25% XP from commits |
+| 🗡️ Frontend Rogue | Fast and precise: +25% XP from file saves |
+| 🛡️ DevOps Paladin | Built for uptime: energy & motivation decay 15% slower |
+
+Your class also retints your avatar in the panel scene (hoodie + glow color), so your build is visible at a glance. Changed your mind? Respec anytime from the Shop for 200 ☕.
+
 ### ⏱ Focus Sprint
 A real Pomodoro-style timer, not just a decoration:
 - Start a 15, 25, or 50-minute sprint from the panel or Command Palette (**"DevGotchi: Start Focus Sprint"**).
@@ -39,7 +50,7 @@ The panel's boss card isn't just decorative — when you have active lint/build 
 - No errors? The card reverts to the standard health-based Burnout Boss.
 
 ### 📊 Weekly Recap
-Once a week, DevGotchi surfaces a quick summary of what you actually did: XP earned, commits, bugs fixed, focus sprints completed, level progress, and your current streak. Silent if you didn't code that week — no guilt-tripping, just a recap.
+Once a week, DevGotchi surfaces a quick summary of what you actually did: XP earned, commits, bugs fixed, focus sprints completed, level progress, and your current streak. Silent if you didn't code that week — no guilt-tripping, just a recap. The notification includes a **Share Recap** action that turns it into the shareable Weekly Recap card (see **Share Your Progress** below).
 
 ### 🏅 Achievements
 13 unlockable badges tracking your milestones:
@@ -69,7 +80,7 @@ Every 30-second tick, there's a chance of a surprise event — good or bad:
 - ...and more. Stay on your toes.
 
 ### 📡 Activity Log
-A live scrollable feed inside the panel showing every recent XP gain, achievement unlock, random event, and level-up — colour-coded by type.
+A live scrollable feed inside the panel showing every recent XP gain, achievement unlock, random event, and level-up — colour-coded by type. A **📋 Standup** button right in the log header turns today's entries into a ready-to-paste "what I did today" post (see **Share Your Progress** below).
 
 ### 🎵 Cyberpunk Music
 Procedurally synthesised ambient music generated entirely with the Web Audio API (no external files):
@@ -106,7 +117,8 @@ Spend beans on skins and gear that affect your stats:
 
 - Business Suit 🕴️, Space Suit 👨‍🚀, Code Wizard 🧙, Debug Ninja 🥷, Autobuild Mode 🤖, Alien Contractor 👽, Night Shift 🧛, Principal Engineer 🤴
 - Ergo Chair (energy decays slower), Mech Keyboard (motivation decays slower)
-- Equipped skins show up everywhere your avatar does — the panel, and the exported Share Stats Card.
+- Equipped skins show up everywhere your avatar does — the panel, and every shareable card.
+- **Class Respec** — switch your Character Class for 200 ☕, right from the same Shop list.
 
 ### 📅 Activity Calendar
 A GitHub-contribution-graph-style heatmap on the main panel, showing your last year of DevGotchi activity at a glance — every XP-earning action (saves, commits, bug fixes, quests, boss defeats) lights up that day's cell. Drawn straight to canvas, no server, no separate tracking to opt into.
@@ -116,11 +128,15 @@ A GitHub-contribution-graph-style heatmap on the main panel, showing your last y
 - **Git** — Commits award +50 XP and +5 beans automatically.
 - **Linter** — Fixing errors awards XP; active errors slowly drain your stats.
 
-### 📤 Share Stats Card
-Turn your progress into something you can actually show people:
-- **📋 Copy as Markdown** — a ready-to-paste stats block (level, streak, stats, achievement count) for your GitHub profile README or a PR description.
-- **🖼️ Save as Image** — a cyberpunk-styled PNG stats card, rendered client-side and saved wherever you like — good for posting your progress on social media.
-- Both are zero-telemetry: everything is generated locally in the panel, nothing leaves your machine except the file you choose to save or the text you choose to paste.
+### 📤 Share Your Progress
+Three shareable cards, all rendered locally — zero telemetry, nothing leaves your machine except the file you choose to save or the text you choose to paste:
+- **🕹️ Stats Card** — a cyberpunk-styled PNG of your level, XP, streak, and lifetime stats.
+- **📊 Weekly Recap** — a GitHub-contribution-graph-style card of your last year of activity, with this week's XP/commits/bugs fixed/focus sprints called out and the current 7-day column outlined.
+- **📋 Standup** — turns today's Activity Log into a ready-to-paste "what I did today" post for Slack, your class/avatar emoji included.
+
+**🐦 Flex This** does both halves of a post in one click: copies a pre-written, hashtag-ready caption to your clipboard and immediately prompts to save the matching card image — paste the caption, attach the image, done.
+
+The classic options are still there for the Stats Card and Weekly Recap: **📋 Copy as Markdown** (a stats block for your GitHub profile README or a PR description) and **🖼️ Save as Image** (just the PNG, no caption).
 
 ### ⚙️ Settings
 A new Settings button on the panel (and `DevGotchi: Open Settings`) lets you tune the experience:
@@ -171,6 +187,8 @@ See your teammates' progress without any server, accounts, or DevGotchi backend 
 | `DevGotchi: Start Focus Sprint (Pomodoro)` | Start a 15/25/50-minute focus sprint for 1.5x XP |
 | `DevGotchi: Cancel Focus Sprint` | Cancel the current sprint early (no completion bonus) |
 | `DevGotchi: Export Stats Card` | Open the panel and bring up the shareable stats card |
+| `DevGotchi: Share Weekly Recap` | Open the panel and bring up the Weekly Recap share card |
+| `DevGotchi: Choose / Respec Class` | Pick your class for the first time, or pay 200 ☕ to switch it later |
 | `DevGotchi: Open Settings` | Open the panel and bring up the Settings modal |
 | `DevGotchi: Export Progress` | Save your full progress + settings to a JSON file |
 | `DevGotchi: Import Progress` | Restore progress + settings from a previously exported file |
@@ -184,27 +202,44 @@ See your teammates' progress without any server, accounts, or DevGotchi backend 
 ## 🎨 Panel Layout
 
 ```
-┌─────────────────────────────────────┐
-│  Avatar │ Name · Role               │
-│         │ LEVEL N  ████░░ XP        │
-│         │ ☕ Beans   🔥 Streak      │
-├─────────────────────────────────────┤
-│ ◈ Stats                             │
-│  🎯 Focus      ████████░░  82       │
-│  ⭐ Motivation ██████░░░░  65       │
-│  ⚡ Energy     ████░░░░░░  42       │
-│  💪 Health     ██████████  100      │
-├──────────────────┬──────────────────┤
-│ ◈ Active Quest  │ ☠/🐛 Boss Card   │
-│  Ship Something │  Overwhelmulus    │
-│  ████░░ 60%     │  ██████░░ 300 HP  │
-├─────────────────────────────────────┤
-│ ◈ Focus Sprint      [1.5x XP]      │
-│         18:42 remaining            │
-├─────────────────────────────────────┤
+┌──────────────────────────────────-───┐
+│  Avatar │ Name · Role                │
+│         │ LEVEL N  ████░░ XP         │
+│         │ ☕ Beans   🔥 Streak        │
+├───────────────────────────────-──────┤
+│ ◈ Stats                              │
+│  🎯 Focus      ████████░░  82        │
+│  ⭐ Motivation ██████░░░░  65        │
+│  ⚡ Energy     ████░░░░░░  42         │
+│  💪 Health     ██████████  100       │
+├──────────────────┬───────────────-───┤
+│ ◈ Active Quest  │ ☠/🐛 Boss Card     │
+│  Ship Something │  Overwhelmulus     │
+│  ████░░ 60%     │  ██████░░ 300 HP   │
+├────────────────────────────────────-─┤
+│ ◈ Focus Sprint      [1.5x XP]        │
+│         18:42 remaining              │
+├─────────────────────────────────────-┤
 │ ☕ 🎯 🌴 ⚡ 🛍️ 🏆 📜 🎵 🏅 📡 📤 ⚙️ 👥│  (👥 only shows for a shared repo)
 └─────────────────────────────────────┘
 ```
+
+---
+
+## 🗺️ Roadmap
+
+Planned for a future update:
+- **Seasonal Events** — limited-time cosmetics, quests, and boss fights tied to real-world seasons/holidays.
+
+Have an idea? Use `DevGotchi: Send Feedback` — that's what it's there for.
+
+---
+
+## ⭐ Enjoying DevGotchi?
+
+A rating on the Marketplace is the single biggest thing that helps a free extension like this get discovered. If your developer is still alive, consider leaving one — it takes 20 seconds.
+
+Found a bug or want a feature? [Open an issue](https://github.com/johnfacey/vscode-devgotchi/issues) — I read every one.
 
 ---
 
