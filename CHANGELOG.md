@@ -6,7 +6,46 @@ All notable changes to the "DevGotchi" extension will be documented in this file
 
 ### Roadmap — ideas being considered, not yet built
 - **Raid Boss MVP**: show each teammate's bug-fix contribution during a Team Raid Boss fight, with an "MVP" tag for whoever cleared the most.
-- **Seasonal Events**: limited-time cosmetics, quests, and boss fights tied to real-world seasons/holidays.
+- **Code Smell Boss, function-length mode**: the current boss only counts bloated *files* (300+ lines, free via `TextDocument.lineCount`); flagging individual 200-line *functions* needs real per-language parsing and is a bigger, separate build.
+
+## [2.8.0] - 2026-09-25
+
+### Added
+- **The Legacy Code Dungeon**: a 7-chapter narrative questline, new 📖 Story button. Each chapter is one objective (save/commit/fix/time, same shape as a daily quest) with its own flavor text; completing one starts a next-day gate, so the full arc plays out over at least 7 real days instead of being grindable in one sitting. Finishing all 7 chapters grants an exclusive 💀 Legacy Slayer skin.
+- **Community Quest Packs**: a shareable JSON format for themed quest sets, importable from a local file (`DevGotchi: Import Quest Pack from File`, zero network calls) or, opt-in, from a URL (`DevGotchi: Import Quest Pack from URL`) with an explicit confirmation dialog disclosing the request — the only thing in DevGotchi that ever makes a network call, and only when you ask it to. Since this is the first place the extension ever consumes someone else's content, every field is strictly validated (bounded targets/rewards, allow-listed quest types) and HTML-escaped before it's stored. Two example packs ship in the repo's `quest-packs/` folder: "100 Days of Code" and a "Hacktoberfest Quest Pack" (a separate, stackable track from the existing seasonal Hacktoberfest event). New 🎁 Quest Packs section in the Quests modal, with per-pack removal.
+- **Boss Affixes**: a Diablo-rift-style weekly mutator, shown as a banner on the panel — deterministically picked from the ISO week number, so it rotates automatically every Monday with no server and no persisted state. Mostly positive/flavorful (Sprint Surge, Boss Rush, Quest Rally, Iron Streak, Slow Burn, Caffeine Week), plus one that ties into something you already control directly (Double Trouble: active bugs drain stats twice as fast).
+- **Timesheet Mode**: a new 📊 Export Timesheet button in Settings exports your real coding time (tracked the same "ignore offline/idle time" way as quest time already was) as a Date/Hours CSV for the last 7/30/90 days or all history — no rate applied, just honest billable hours for freelancers to plug into their own invoicing.
+
+## [2.7.0] - 2026-09-25
+
+### Added
+- **Seasonal Events**: a full year-round calendar of recurring, time-boxed events — each lives automatically every year on the same real-world date(s), no manual reset needed. Seven events ship with it:
+    - **Pi Day 🥧** (March 14): ship 3 commits to earn **3.14 Coder**.
+    - **April Fools' 🤡** (April 1): just have DevGotchi open that day to earn **Prankster**.
+    - **May the 4th 🌌** (May 4): fix 5 bugs to earn **Jedi Debugger**.
+    - **Summer Hack Season 🏖️** (June–August): complete 10 Focus Sprints to earn **Code Beach**.
+    - **Programmer's Day 💾** (Sept 13): make 1 commit to earn **256 Club**.
+    - **Hacktoberfest 🎃** (October): merge 4 pull requests — detected from local git history (GitHub's default merge-commit message or a squash-merge's trailing `(#123)`), no account or API access needed — to earn **Hacktoberfest Hunter**.
+    - **Debug the Halls 🎄** (December): fix 25 bugs to earn **Holiday Debugger**.
+    - Every skin is limited — earned only, never purchasable — and a themed banner (unique colors per event) appears on the panel while its event is active, showing a "complete" state once earned; progress also shows in the Quests modal. Both disappear once the event's window ends. High-frequency triggers (bug fixes, Focus Sprints) tick silently off their existing reward pipelines instead of adding another popup on top of an already-frequent one; rarer triggers (PR merges) still get their own toast.
+- **Merge Conflict Kraken**: a second live boss, same family as the Bug Boss — HP is the real count of files with unresolved git merge conflicts, sourced straight from the git extension's own state (no shelling out). Tiered by conflict count (Conflict Tentacle → Merge Kraken → Rebase Leviathan → Git Cthulhu). Resolving conflicts pays XP as you go; clearing every conflict defeats it for +30 XP, +15 ☕. Takes priority over the Bug Boss on the boss card, since a live conflict blocks work.
+- **Code Smell Boss**: a third boss — HP is the count of currently-open files over 300 lines. Scoped to open documents (a free, in-memory check, no workspace scan) rather than the whole repo, so it only sees what you actually have open. Shrinking a bloated file under the threshold pays 40 XP; clearing every open file defeats it for the same +30 XP, +15 ☕ bonus. Lowest priority of the three real bosses — it only shows once nothing more urgent (a merge conflict or a lint error) is going on.
+- **Prestige**: once you hit the Level 50 cap, a 🌟 PRESTIGE button appears — resets you to Level 1 (back to "Junior Developer") in exchange for a permanent, stacking +5% XP bonus per prestige. Lifetime stats, streak, achievements, and inventory are untouched.
+- **Secret Achievements**: two hidden "???" badges that only reveal themselves once unlocked — **Night Owl** (save a file between 3–4am) and **Quick Draw** (fix a bug within 60 seconds of it appearing).
+- **Daily Login Calendar**: a new 📅 Calendar view overlays a repeating 30-day cycle on top of your existing login streak — Day 30 of every cycle pays a one-time +100 XP, +100 ☕ bonus on top of the normal daily bonus.
+- **Idle Detection**: no real editor activity (selection changes, editor switches, window focus) for 10 minutes reads as AFK — stat decay pauses and your avatar visibly falls asleep instead of draining while you're at lunch. Resumes the instant you're back.
+- **Dynamic Boss Music**: the procedural soundtrack now intensifies as the Bug Boss grows — double-time kicks, a brighter/louder bass and arp, urgent 16th-note fills, and a low pulsing alarm siren past 80% HP, all scaled to the same pacing as the boss's own HP bar. The music icon flips to 👾 while it's active.
+- **Year in Code Wrapped**: a new 🎁 tab in the Share modal — a Spotify-Wrapped-style annual card covering lifetime total XP, bosses slain, longest streak ever, and your most productive coding hour, with a fun flavor tag (Night Owl 🦉, Early Bird 🐦, etc.). Fires as a one-time notification roughly once a year; reopen anytime from the tab.
+- **Buy the Dev a Coffee**: a new 💖 Sponsor button opens GitHub Sponsors and, once per day, grants a small in-game coffee-bean bonus (+25 ☕) for checking it out — there's no way for a VS Code extension to verify an actual sponsorship, so this rewards clicking through rather than paying.
+
+## [2.6.0] - 2026-09-24
+
+### Added
+- **Character Class presence, everywhere**: your chosen class now shows up well beyond the panel.
+    - Status bar gets a new class badge, tinted in your class's accent color, sitting alongside the main stats item as a persistent reminder of who's watching over your code.
+    - The main status bar item's class glyph now gently animates between two frames (🔮↔✨ Backend Mage, 🗡️↔💨 Frontend Rogue, 🛡️↔⚡ DevOps Paladin) instead of sitting static.
+    - Toasts for level-ups, achievement unlocks, the daily login bonus, completing all daily quests, and the weekly recap are now tagged with your class emoji.
+    - Backend Mage's commit toast and DevOps Paladin's daily bonus toast get a class-flavored line when their passive applies; Frontend Rogue's save bonus shows as a quick status bar flash (saves fire too often for a popup every time).
 
 ## [2.5.0] - 2026-09-21
 

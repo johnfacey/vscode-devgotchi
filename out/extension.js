@@ -17,6 +17,221 @@ const CLASSES = [
     { id: 'devops_paladin', name: 'DevOps Paladin', emoji: '🛡️', color: '#ffb020', description: 'Built for uptime: energy & motivation decay 15% slower.' }
 ];
 const CLASS_RESPEC_COST = 200;
+// Two-frame glyph cycle per class, used to give the status bar badge a
+// subtle "alive" animation instead of a static emoji. Purely cosmetic.
+const CLASS_ANIM_FRAMES = {
+    backend_mage: ['🔮', '✨'],
+    frontend_rogue: ['🗡️', '💨'],
+    devops_paladin: ['🛡️', '⚡']
+};
+const HACKTOBERFEST_EVENT = {
+    id: 'hacktoberfest',
+    name: 'Hacktoberfest',
+    emoji: '🎃',
+    questType: 'pr_merge',
+    questTarget: 4, // matches the traditional real-world Hacktoberfest target
+    questLabel: 'Merge 4 pull requests',
+    progressUnitSingular: 'pull request',
+    progressUnitPlural: 'pull requests',
+    progressVerb: 'merged',
+    perTickReward: { xp: 30, coffee: 15 }, // PR merges have no existing reward pipeline, so pay out per merge
+    showToastOnProgress: true, // merges are infrequent enough that a toast each time is welcome
+    skinId: 'skin_hacktoberfest',
+    skinName: 'Hacktoberfest Hunter',
+    skinEmoji: '🎃',
+    skinDescription: 'Earned by merging 4 pull requests during Hacktoberfest. Not for sale.',
+    isActive: (d) => d.getMonth() === 9, // October, 0-indexed — recurs every year
+    bannerGradientStart: '#4d2600',
+    bannerGradientEnd: '#ff8c00',
+    bannerTextColor: '#1a0f00',
+    accentColor: '#ff8c00'
+};
+const DEBUG_THE_HALLS_EVENT = {
+    id: 'debug_the_halls',
+    name: 'Debug the Halls',
+    emoji: '🎄',
+    questType: 'bugs_fixed',
+    questTarget: 25,
+    questLabel: 'Fix 25 bugs',
+    progressUnitSingular: 'bug',
+    progressUnitPlural: 'bugs',
+    progressVerb: 'fixed',
+    perTickReward: null, // bug fixes already grant XP via updateErrorCount — avoid double-paying and toast spam
+    showToastOnProgress: false,
+    skinId: 'skin_debug_the_halls',
+    skinName: 'Holiday Debugger',
+    skinEmoji: '🎅',
+    skinDescription: 'Earned by fixing 25 bugs during Debug the Halls (December). Not for sale.',
+    isActive: (d) => d.getMonth() === 11, // December — recurs every year
+    bannerGradientStart: '#7a0000',
+    bannerGradientEnd: '#0d4d1a',
+    bannerTextColor: '#ffffff',
+    accentColor: '#2ea043'
+};
+const PI_DAY_EVENT = {
+    id: 'pi_day',
+    name: 'Pi Day',
+    emoji: '🥧',
+    questType: 'commits',
+    questTarget: 3,
+    questLabel: 'Ship 3 commits',
+    progressUnitSingular: 'commit',
+    progressUnitPlural: 'commits',
+    progressVerb: 'shipped',
+    perTickReward: null, // commits already grant XP via onGitCommit — avoid double-paying
+    showToastOnProgress: false,
+    skinId: 'skin_pi_day',
+    skinName: '3.14 Coder',
+    skinEmoji: '🥧',
+    skinDescription: 'Earned by shipping 3 commits on Pi Day (March 14). Not for sale.',
+    isActive: (d) => d.getMonth() === 2 && d.getDate() === 14, // March 14 only
+    bannerGradientStart: '#1a2b4d',
+    bannerGradientEnd: '#f4c430',
+    bannerTextColor: '#1a1a1a',
+    accentColor: '#f4c430'
+};
+const APRIL_FOOLS_EVENT = {
+    id: 'april_fools',
+    name: "April Fools'",
+    emoji: '🤡',
+    questType: 'panel_open',
+    questTarget: 1,
+    questLabel: "Open DevGotchi on April Fools' Day",
+    progressUnitSingular: 'visit',
+    progressUnitPlural: 'visits',
+    progressVerb: 'logged',
+    perTickReward: null, // purely a joke skin, no economy impact intended
+    showToastOnProgress: false, // completes on the very first tick anyway
+    skinId: 'skin_april_fools',
+    skinName: 'Prankster',
+    skinEmoji: '🤡',
+    skinDescription: "Earned just by having DevGotchi open on April Fools' Day. Not for sale.",
+    isActive: (d) => d.getMonth() === 3 && d.getDate() === 1, // April 1 only
+    bannerGradientStart: '#4d004d',
+    bannerGradientEnd: '#ff66ff',
+    bannerTextColor: '#ffffff',
+    accentColor: '#ff66ff'
+};
+const MAY_THE_FOURTH_EVENT = {
+    id: 'may_the_fourth',
+    name: 'May the 4th',
+    emoji: '🌌',
+    questType: 'bugs_fixed',
+    questTarget: 5,
+    questLabel: 'Fix 5 bugs — the Force is strong today',
+    progressUnitSingular: 'bug',
+    progressUnitPlural: 'bugs',
+    progressVerb: 'fixed',
+    perTickReward: null, // bug fixes already grant XP via updateErrorCount — avoid double-paying and toast spam
+    showToastOnProgress: false,
+    skinId: 'skin_may_the_fourth',
+    skinName: 'Jedi Debugger',
+    skinEmoji: '⚔️',
+    skinDescription: 'Earned by fixing 5 bugs on Star Wars Day (May 4). Not for sale.',
+    isActive: (d) => d.getMonth() === 4 && d.getDate() === 4, // May 4 only
+    bannerGradientStart: '#001a00',
+    bannerGradientEnd: '#00ff41',
+    bannerTextColor: '#ffffff',
+    accentColor: '#00ff41'
+};
+const SUMMER_HACK_SEASON_EVENT = {
+    id: 'summer_hack_season',
+    name: 'Summer Hack Season',
+    emoji: '🏖️',
+    questType: 'focus_sprints',
+    questTarget: 10,
+    questLabel: 'Complete 10 Focus Sprints',
+    progressUnitSingular: 'Focus Sprint',
+    progressUnitPlural: 'Focus Sprints',
+    progressVerb: 'completed',
+    perTickReward: null, // Focus Sprint completion already grants its own bonus — avoid double-paying
+    showToastOnProgress: false,
+    skinId: 'skin_summer_hack_season',
+    skinName: 'Code Beach',
+    skinEmoji: '🏖️',
+    skinDescription: 'Earned by completing 10 Focus Sprints during Summer Hack Season (June–August). Not for sale.',
+    isActive: (d) => [5, 6, 7].includes(d.getMonth()), // June, July, August — recurs every year
+    bannerGradientStart: '#003d4d',
+    bannerGradientEnd: '#ffd166',
+    bannerTextColor: '#00232b',
+    accentColor: '#ffd166'
+};
+const PROGRAMMERS_DAY_EVENT = {
+    id: 'programmers_day',
+    name: "Programmer's Day",
+    emoji: '💾',
+    questType: 'commits',
+    questTarget: 1,
+    questLabel: 'Make 1 commit to celebrate',
+    progressUnitSingular: 'commit',
+    progressUnitPlural: 'commits',
+    progressVerb: 'made',
+    perTickReward: null, // commits already grant XP via onGitCommit — avoid double-paying
+    showToastOnProgress: false,
+    skinId: 'skin_programmers_day',
+    skinName: '256 Club',
+    skinEmoji: '💾',
+    skinDescription: "Earned by committing on Programmer's Day (Sept 13 — the 256th day of a non-leap year). Not for sale.",
+    // Programmer's Day is technically "day 256 of the year" (Sept 12 in leap
+    // years), but hardcoding Sept 13 is close enough for a cosmetic game event.
+    isActive: (d) => d.getMonth() === 8 && d.getDate() === 13, // September 13 only
+    bannerGradientStart: '#0d1b2a',
+    bannerGradientEnd: '#00d9ff',
+    bannerTextColor: '#001018',
+    accentColor: '#00d9ff'
+};
+const SEASONAL_EVENTS = [
+    PI_DAY_EVENT,
+    APRIL_FOOLS_EVENT,
+    MAY_THE_FOURTH_EVENT,
+    SUMMER_HACK_SEASON_EVENT,
+    PROGRAMMERS_DAY_EVENT,
+    HACKTOBERFEST_EVENT,
+    DEBUG_THE_HALLS_EVENT
+];
+function getActiveSeasonalEvent(d = new Date()) {
+    return SEASONAL_EVENTS.find(e => e.isActive(d)) || null;
+}
+/** Year-scoped id so next year's Hacktoberfest starts with fresh progress automatically. */
+function seasonalEventInstanceId(event, d = new Date()) {
+    return `${event.id}-${d.getFullYear()}`;
+}
+const BOSS_AFFIXES = [
+    { id: 'double_trouble', name: 'Double Trouble', emoji: '🔥', description: 'Active bugs drain energy & motivation twice as fast — keep that error count down.', bugStressMultiplier: 2 },
+    { id: 'sprint_surge', name: 'Sprint Surge', emoji: '⏱️', description: 'Focus Sprint completions pay double coffee this week.', sprintCoffeeMultiplier: 2 },
+    { id: 'boss_rush', name: 'Boss Rush', emoji: '👾', description: 'Every boss defeat pays double XP and coffee this week.', bossBonusMultiplier: 2 },
+    { id: 'quest_rally', name: 'Quest Rally', emoji: '📜', description: 'Daily quest rewards are doubled this week.', questRewardMultiplier: 2 },
+    { id: 'iron_streak', name: 'Iron Streak', emoji: '🔥', description: 'The daily login bonus pays double coffee this week.', dailyBonusMultiplier: 2 },
+    { id: 'slow_burn', name: 'Slow Burn', emoji: '🌙', description: 'All stat decay is 30% slower this week — an easy week.', decayMultiplier: 0.7 },
+    { id: 'caffeine_week', name: 'Caffeine Week', emoji: '☕', description: 'Every source of coffee beans pays 50% more this week.', sprintCoffeeMultiplier: 1.5, dailyBonusMultiplier: 1.5, questRewardMultiplier: 1.5, bossBonusMultiplier: 1.5 }
+];
+/** ISO 8601 week key (Monday-start), e.g. "2026-W39" — changes every Monday. */
+function getISOWeekKey(d = new Date()) {
+    const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const dayNum = date.getUTCDay() || 7;
+    date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+    const weekNo = Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+    return `${date.getUTCFullYear()}-W${weekNo}`;
+}
+/** Deterministic pick: the same ISO week always maps to the same affix, with no state to persist or reset. */
+function getActiveBossAffix(d = new Date()) {
+    const key = getISOWeekKey(d);
+    let hash = 0;
+    for (let i = 0; i < key.length; i++)
+        hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+    return BOSS_AFFIXES[hash % BOSS_AFFIXES.length];
+}
+const LEGACY_DUNGEON_CHAPTERS = [
+    { title: 'The Crumbling Entrance', flavorText: 'You step through a splintered doorway into a repo no one has touched since 2014. Dust and dead branches everywhere.', type: 'save', target: 10, rewardXp: 20, rewardCoffee: 15 },
+    { title: 'Whispers in the Changelog', flavorText: "Something moved in utils.js. The changelog hasn't been updated in three years, yet the entries keep growing.", type: 'commit', target: 3, rewardXp: 30, rewardCoffee: 20 },
+    { title: 'The Dependency Crypt', flavorText: 'Ancient imports guard the path forward, each one older and more deprecated than the last.', type: 'fix', target: 5, rewardXp: 40, rewardCoffee: 25 },
+    { title: 'Echoes of Deprecated Code', flavorText: 'Voices in the console warn of functions long forgotten. You press on, one keystroke at a time.', type: 'time', target: 45, rewardXp: 50, rewardCoffee: 30 },
+    { title: 'The Merge Conflict Labyrinth', flavorText: 'The walls shift with every rebase. There is no map here, only <<<<<<< HEAD.', type: 'fix', target: 8, rewardXp: 60, rewardCoffee: 35 },
+    { title: "The Refactor's Reckoning", flavorText: 'One final push before the core. Ship clean, ship often.', type: 'commit', target: 6, rewardXp: 75, rewardCoffee: 45 },
+    { title: 'The Legacy Core', flavorText: 'At the heart of the dungeon: the original commit. Everything in this codebase traces back to this one change.', type: 'save', target: 25, rewardXp: 100, rewardCoffee: 60 }
+];
+const LEGACY_DUNGEON_SKIN_ID = 'skin_legacy_slayer';
 const SHOP_ITEMS = [
     { id: 'skin_suit', name: 'Business Suit', type: 'skin', description: 'Dress for success', cost: 150, emoji: '🕴️' },
     { id: 'skin_space', name: 'Space Suit', type: 'skin', description: 'Code in zero-g', cost: 300, emoji: '👨‍🚀' },
@@ -27,8 +242,94 @@ const SHOP_ITEMS = [
     { id: 'skin_vampire', name: 'Night Shift', type: 'skin', description: 'Commits after midnight only', cost: 275, emoji: '🧛' },
     { id: 'skin_royalty', name: 'Principal Engineer', type: 'skin', description: 'You approve your own PRs now', cost: 500, emoji: '🤴' },
     { id: 'furn_chair', name: 'Ergo Chair', type: 'furniture', description: 'Energy decays 15% slower', cost: 200 },
-    { id: 'acc_keyboard', name: 'Mech Keyboard', type: 'accessory', description: 'Motivation decays 15% slower', cost: 250 }
+    { id: 'acc_keyboard', name: 'Mech Keyboard', type: 'accessory', description: 'Motivation decays 15% slower', cost: 250 },
+    { id: HACKTOBERFEST_EVENT.skinId, name: HACKTOBERFEST_EVENT.skinName, type: 'skin', description: HACKTOBERFEST_EVENT.skinDescription, cost: 0, emoji: HACKTOBERFEST_EVENT.skinEmoji, eventOnly: true },
+    { id: DEBUG_THE_HALLS_EVENT.skinId, name: DEBUG_THE_HALLS_EVENT.skinName, type: 'skin', description: DEBUG_THE_HALLS_EVENT.skinDescription, cost: 0, emoji: DEBUG_THE_HALLS_EVENT.skinEmoji, eventOnly: true },
+    { id: PI_DAY_EVENT.skinId, name: PI_DAY_EVENT.skinName, type: 'skin', description: PI_DAY_EVENT.skinDescription, cost: 0, emoji: PI_DAY_EVENT.skinEmoji, eventOnly: true },
+    { id: APRIL_FOOLS_EVENT.skinId, name: APRIL_FOOLS_EVENT.skinName, type: 'skin', description: APRIL_FOOLS_EVENT.skinDescription, cost: 0, emoji: APRIL_FOOLS_EVENT.skinEmoji, eventOnly: true },
+    { id: MAY_THE_FOURTH_EVENT.skinId, name: MAY_THE_FOURTH_EVENT.skinName, type: 'skin', description: MAY_THE_FOURTH_EVENT.skinDescription, cost: 0, emoji: MAY_THE_FOURTH_EVENT.skinEmoji, eventOnly: true },
+    { id: SUMMER_HACK_SEASON_EVENT.skinId, name: SUMMER_HACK_SEASON_EVENT.skinName, type: 'skin', description: SUMMER_HACK_SEASON_EVENT.skinDescription, cost: 0, emoji: SUMMER_HACK_SEASON_EVENT.skinEmoji, eventOnly: true },
+    { id: PROGRAMMERS_DAY_EVENT.skinId, name: PROGRAMMERS_DAY_EVENT.skinName, type: 'skin', description: PROGRAMMERS_DAY_EVENT.skinDescription, cost: 0, emoji: PROGRAMMERS_DAY_EVENT.skinEmoji, eventOnly: true },
+    { id: LEGACY_DUNGEON_SKIN_ID, name: 'Legacy Slayer', type: 'skin', description: 'Earned by completing all 7 chapters of The Legacy Code Dungeon. Not for sale.', cost: 0, emoji: '💀', eventOnly: true }
 ];
+const QUEST_PACK_MAX_QUESTS = 30;
+const QUEST_PACK_MAX_TARGET = 10000;
+const QUEST_PACK_MAX_REWARD = 1000;
+const QUEST_PACK_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
+/** Escapes text pulled from an untrusted Quest Pack before it's ever stored — the webview renders quest descriptions via innerHTML, not textContent. */
+function escapeHtml(text) {
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+/**
+ * Validates and normalizes a parsed Quest Pack JSON payload. Returns an
+ * error string if anything is wrong (caller shows it verbatim), or the
+ * validated pack (with all free text escaped) on success. Deliberately
+ * strict — this is the one place in DevGotchi that ever consumes content
+ * someone else wrote, so every field is bounds-checked rather than trusted.
+ */
+function validateQuestPack(raw) {
+    if (!raw || typeof raw !== 'object')
+        return { error: 'Not a valid Quest Pack: expected a JSON object.' };
+    if (typeof raw.packId !== 'string' || !QUEST_PACK_ID_PATTERN.test(raw.packId)) {
+        return { error: 'Invalid packId: must be 1-64 letters/numbers/dashes/underscores.' };
+    }
+    if (typeof raw.packName !== 'string' || !raw.packName.trim() || raw.packName.length > 80) {
+        return { error: 'Invalid packName: must be a non-empty string up to 80 characters.' };
+    }
+    if (raw.packDescription !== undefined && (typeof raw.packDescription !== 'string' || raw.packDescription.length > 300)) {
+        return { error: 'Invalid packDescription: must be a string up to 300 characters.' };
+    }
+    if (!Array.isArray(raw.quests) || raw.quests.length === 0) {
+        return { error: 'Invalid quests: must be a non-empty array.' };
+    }
+    if (raw.quests.length > QUEST_PACK_MAX_QUESTS) {
+        return { error: `Too many quests: a pack can have at most ${QUEST_PACK_MAX_QUESTS}.` };
+    }
+    const seenIds = new Set();
+    const quests = [];
+    for (const q of raw.quests) {
+        if (!q || typeof q !== 'object')
+            return { error: 'Invalid quest entry: expected an object.' };
+        if (typeof q.id !== 'string' || !QUEST_PACK_ID_PATTERN.test(q.id)) {
+            return { error: `Invalid quest id "${q?.id}": must be 1-64 letters/numbers/dashes/underscores.` };
+        }
+        if (seenIds.has(q.id))
+            return { error: `Duplicate quest id "${q.id}" within the pack.` };
+        seenIds.add(q.id);
+        if (!['save', 'commit', 'fix', 'time'].includes(q.type)) {
+            return { error: `Invalid quest type "${q.type}": must be one of save, commit, fix, time.` };
+        }
+        if (typeof q.description !== 'string' || !q.description.trim() || q.description.length > 150) {
+            return { error: `Invalid description for quest "${q.id}": must be a non-empty string up to 150 characters.` };
+        }
+        if (!Number.isInteger(q.target) || q.target < 1 || q.target > QUEST_PACK_MAX_TARGET) {
+            return { error: `Invalid target for quest "${q.id}": must be an integer between 1 and ${QUEST_PACK_MAX_TARGET}.` };
+        }
+        if (!Number.isInteger(q.reward) || q.reward < 0 || q.reward > QUEST_PACK_MAX_REWARD) {
+            return { error: `Invalid reward for quest "${q.id}": must be an integer between 0 and ${QUEST_PACK_MAX_REWARD}.` };
+        }
+        quests.push({
+            id: q.id,
+            type: q.type,
+            description: escapeHtml(q.description.trim()),
+            target: q.target,
+            reward: q.reward
+        });
+    }
+    return {
+        pack: {
+            packId: raw.packId,
+            packName: escapeHtml(raw.packName.trim()),
+            packDescription: raw.packDescription ? escapeHtml(raw.packDescription.trim()) : undefined,
+            quests
+        }
+    };
+}
 const ACHIEVEMENTS = [
     { id: 'first_save', name: 'First Keystroke', icon: '⌨️', description: 'Save your first file' },
     { id: 'first_commit', name: 'Ship It', icon: '🚀', description: 'Make your first commit' },
@@ -43,15 +344,32 @@ const ACHIEVEMENTS = [
     { id: 'survived_burnout', name: 'Back from the Edge', icon: '💀', description: 'Recover from full burnout' },
     { id: 'quest_streak_5', name: 'Quest Master', icon: '📜', description: 'Complete quests 5 days in a row' },
     { id: 'focus_sprints_10', name: 'Deep Work', icon: '⏱️', description: 'Complete 10 Focus Sprints' },
+    { id: 'night_owl', name: 'Night Owl', icon: '🦉', description: 'Save a file between 3am and 4am', secret: true },
+    { id: 'quick_draw', name: 'Quick Draw', icon: '🤠', description: 'Fix a bug within 60 seconds of it appearing', secret: true },
 ];
 const FOCUS_SPRINT_XP_MULTIPLIER = 1.5;
 const FOCUS_SPRINT_BONUS_XP = 40;
 const FOCUS_SPRINT_BONUS_COFFEE = 25;
 const BUG_BOSS_DEFEAT_BONUS_XP = 30;
 const BUG_BOSS_DEFEAT_BONUS_COFFEE = 15;
+const MERGE_KRAKEN_DEFEAT_BONUS_XP = 30;
+const MERGE_KRAKEN_DEFEAT_BONUS_COFFEE = 15;
+const LONG_FILE_LINE_THRESHOLD = 300; // Files past this line count count as Code Smell Boss HP — matches the common ESLint max-lines default
+const CODE_SMELL_REFACTOR_XP_PER_FILE = 40; // Chunkier than a bug fix's 5 XP — shrinking a bloated file below threshold is real refactoring work
+const CODE_SMELL_BOSS_DEFEAT_BONUS_XP = 30;
+const CODE_SMELL_BOSS_DEFEAT_BONUS_COFFEE = 15;
 const TEAM_RAID_BOSS_DEFEAT_BONUS_XP = 25;
 const TEAM_RAID_BOSS_DEFEAT_BONUS_COFFEE = 20;
 const WEEKLY_RECAP_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+const YEARLY_RECAP_INTERVAL_MS = 365 * 24 * 60 * 60 * 1000;
+const PRESTIGE_LEVEL_REQUIREMENT = 50;
+const PRESTIGE_XP_BONUS_PER_PRESTIGE = 0.05; // +5% XP gain per prestige, stacking and permanent
+const DAILY_CALENDAR_CYCLE_LENGTH = 30;
+const DAILY_CALENDAR_MILESTONE_BONUS_XP = 100;
+const DAILY_CALENDAR_MILESTONE_BONUS_COFFEE = 100;
+const IDLE_THRESHOLD_MS = 10 * 60 * 1000; // No editor activity for 10 minutes reads as AFK, not "still coding"
+const SPONSOR_CLICK_COFFEE_BONUS = 25;
+const SPONSOR_CLICK_COOLDOWN_MS = 24 * 60 * 60 * 1000; // Once per day — there's no way to verify a real sponsorship, so this rewards checking the page out, not payment
 const DEFAULT_SETTINGS = {
     weeklyRecapEnabled: true,
     reduceNotifications: false,
@@ -77,6 +395,18 @@ function mergeSettings(raw) {
     };
 }
 /**
+ * Code Smell Boss detection: counts currently-open files over
+ * LONG_FILE_LINE_THRESHOLD lines. Scoped to open documents rather than a
+ * workspace-wide scan — TextDocument.lineCount is a free in-memory
+ * property, so this is cheap enough to call on every open/close/save
+ * without a debounce or background scan. Top-level (not a closure inside
+ * activate()) so it can be called from listeners registered at different
+ * points in activation without duplicating the filter logic.
+ */
+function countOpenLongFiles() {
+    return vscode.workspace.textDocuments.filter(doc => doc.uri.scheme === 'file' && doc.lineCount > LONG_FILE_LINE_THRESHOLD).length;
+}
+/**
  * Extension activation entry point.
  * Initializes the game manager, status bar, and event listeners.
  */
@@ -98,32 +428,68 @@ function activate(context) {
     // again next time VS Code starts (no class is ever silently assigned).
     if (!devManager.getCharacterClass()) {
         devManager.chooseClass().then(result => {
-            if (result.success)
+            if (result.success) {
                 vscode.window.showInformationMessage(result.message);
+                updateStatusBar();
+                DeveloperPanel.currentPanel?.updateDeveloper();
+            }
         });
     }
     // Create and configure the status bar item
     const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusBarItem.command = 'devgotchi.openPanel';
     context.subscriptions.push(statusBarItem);
+    // A small always-on badge, left of everything else in the status bar, that
+    // stays tinted in the chosen class's accent color — an ambient reminder of
+    // who's "watching over" your code, distinct from the main stats item.
+    const classBadgeItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    classBadgeItem.command = 'devgotchi.openPanel';
+    context.subscriptions.push(classBadgeItem);
+    // Toggled by classAnimInterval below to give the class glyph in the main
+    // status bar item a subtle two-frame animation instead of sitting static.
+    let classAnimFrame = 0;
     /**
      * Updates the status bar text and tooltip with current stats.
      */
     const updateStatusBar = () => {
         const dev = devManager.getDeveloper();
         const emoji = getMoodEmoji(dev.mood);
+        const classInfo = devManager.getClassInfo();
         let text = `${emoji} ${dev.name} Lv${dev.level}`;
+        if (classInfo) {
+            const frames = CLASS_ANIM_FRAMES[classInfo.id] || [classInfo.emoji, classInfo.emoji];
+            text = `${frames[classAnimFrame % frames.length]} ${text}`;
+        }
         const remaining = (dev.focusSprintEndsAt || 0) - Date.now();
         if (remaining > 0) {
             text += ` ⏱ ${formatMMSS(remaining)}`;
         }
         statusBarItem.text = text;
         statusBarItem.tooltip = `💪 ${Math.round(dev.health)}% | 🔥 ${Math.round(dev.motivation)}% | 🧠 ${Math.round(dev.focus)}% | ☕ ${dev.coffee}`
+            + (classInfo ? `\n${classInfo.emoji} ${classInfo.name} — ${classInfo.description}` : '')
             + (remaining > 0 ? `\n⏱ Focus Sprint: ${formatMMSS(remaining)} left (${FOCUS_SPRINT_XP_MULTIPLIER}x XP)` : '');
         statusBarItem.show();
+        if (classInfo) {
+            classBadgeItem.text = classInfo.emoji;
+            classBadgeItem.color = classInfo.color;
+            classBadgeItem.tooltip = `${classInfo.emoji} ${classInfo.name} — ${classInfo.description}`;
+            classBadgeItem.show();
+        }
+        else {
+            classBadgeItem.hide();
+        }
     };
     // Initial status bar update
     updateStatusBar();
+    // Advances the class glyph animation independently of the 30s stats loop
+    // so it stays lively even when nothing else changes.
+    const classAnimInterval = setInterval(() => {
+        if (!devManager.getClassInfo())
+            return;
+        classAnimFrame++;
+        updateStatusBar();
+    }, 900);
+    context.subscriptions.push({ dispose: () => clearInterval(classAnimInterval) });
     // Register the command to open the main webview panel
     context.subscriptions.push(vscode.commands.registerCommand('devgotchi.openPanel', () => {
         DeveloperPanel.createOrShow(context.extensionUri, devManager, teamManager);
@@ -131,6 +497,15 @@ function activate(context) {
     // Register command to reset progress
     context.subscriptions.push(vscode.commands.registerCommand('devgotchi.resetProgress', async () => {
         await devManager.resetProgress();
+        DeveloperPanel.currentPanel?.updateDeveloper();
+    }));
+    // Register Prestige — only does anything once the player hits the level
+    // cap (devManager.prestige() itself guards that and confirms with the user).
+    context.subscriptions.push(vscode.commands.registerCommand('devgotchi.prestige', async () => {
+        const result = await devManager.prestige();
+        if (!result.success && result.message !== 'Prestige cancelled.') {
+            vscode.window.showWarningMessage(result.message);
+        }
         DeveloperPanel.currentPanel?.updateDeveloper();
     }));
     // Register Focus Sprint commands (Pomodoro-style timed XP boost)
@@ -177,6 +552,13 @@ function activate(context) {
         DeveloperPanel.createOrShow(context.extensionUri, devManager, teamManager);
         DeveloperPanel.currentPanel?.openWeeklyRecapShare();
     }));
+    // Register command to open the Year in Code Wrapped share card — used
+    // both from the Command Palette and as the "View Wrapped" action on the
+    // yearly recap notification (see DeveloperManager.checkYearlyRecap()).
+    context.subscriptions.push(vscode.commands.registerCommand('devgotchi.openYearlyRecap', () => {
+        DeveloperPanel.createOrShow(context.extensionUri, devManager, teamManager);
+        DeveloperPanel.currentPanel?.openYearlyRecapShare();
+    }));
     // Register command to open the Settings modal
     context.subscriptions.push(vscode.commands.registerCommand('devgotchi.openSettings', () => {
         DeveloperPanel.createOrShow(context.extensionUri, devManager, teamManager);
@@ -203,6 +585,37 @@ function activate(context) {
         }
         catch (err) {
             vscode.window.showErrorMessage('Failed to export progress.');
+        }
+    }));
+    // Register Timesheet Mode: exports the tracked daily-minutes-coded log
+    // (see DeveloperManager.recordTimesheetMinutes) as a billable-hours CSV.
+    // No rate/currency — DevGotchi hands over honest hours per day, not a bill.
+    context.subscriptions.push(vscode.commands.registerCommand('devgotchi.exportTimesheet', async () => {
+        const rangeChoice = await vscode.window.showQuickPick([
+            { label: 'Last 7 days', value: 7 },
+            { label: 'Last 30 days', value: 30 },
+            { label: 'Last 90 days', value: 90 },
+            { label: 'All tracked history', value: 'all' }
+        ], { placeHolder: 'Timesheet range' });
+        if (!rangeChoice)
+            return;
+        const csv = devManager.exportTimesheetData(rangeChoice.value);
+        const defaultUri = vscode.Uri.file(path.join(os.homedir(), `devgotchi-timesheet.csv`));
+        const target = await vscode.window.showSaveDialog({
+            defaultUri,
+            filters: { 'CSV': ['csv'] }
+        });
+        if (!target)
+            return;
+        try {
+            await vscode.workspace.fs.writeFile(target, Buffer.from(csv, 'utf8'));
+            const choice = await vscode.window.showInformationMessage('💼 Timesheet exported!', 'Reveal in Folder');
+            if (choice === 'Reveal in Folder') {
+                vscode.commands.executeCommand('revealFileInOS', target);
+            }
+        }
+        catch {
+            vscode.window.showErrorMessage('Failed to export timesheet.');
         }
     }));
     // Register progress import: reads a previously exported JSON file and
@@ -233,6 +646,67 @@ function activate(context) {
             vscode.window.showErrorMessage('Failed to read that file.');
         }
     }));
+    // Register Quest Pack import from a local file — the zero-network-call
+    // default. Community-authored quest packs are plain data (type/target/
+    // reward), validated and HTML-escaped in DeveloperManager.importQuestPack
+    // before ever touching state or the webview.
+    context.subscriptions.push(vscode.commands.registerCommand('devgotchi.importQuestPack', async () => {
+        const picked = await vscode.window.showOpenDialog({
+            canSelectMany: false,
+            filters: { 'DevGotchi Quest Pack': ['json'] }
+        });
+        if (!picked || !picked[0])
+            return;
+        try {
+            const bytes = await vscode.workspace.fs.readFile(picked[0]);
+            const result = devManager.importQuestPack(Buffer.from(bytes).toString('utf8'));
+            if (result.success) {
+                vscode.window.showInformationMessage(result.message);
+            }
+            else {
+                vscode.window.showErrorMessage(result.message);
+            }
+            DeveloperPanel.currentPanel?.updateDeveloper();
+        }
+        catch {
+            vscode.window.showErrorMessage('Failed to read that file.');
+        }
+    }));
+    // Register Quest Pack import from a URL — the only thing in DevGotchi
+    // that ever makes a network request, and only when the user explicitly
+    // pastes a URL and confirms it. Lets someone share a pack as a raw
+    // GitHub JSON link instead of a file to download first.
+    context.subscriptions.push(vscode.commands.registerCommand('devgotchi.importQuestPackFromUrl', async () => {
+        const url = await vscode.window.showInputBox({
+            prompt: 'URL of a Quest Pack JSON file (e.g. a raw GitHub link)',
+            placeHolder: 'https://raw.githubusercontent.com/.../quest-pack.json',
+            validateInput: (v) => (/^https:\/\//.test(v.trim()) ? undefined : 'Must be an https:// URL')
+        });
+        if (!url)
+            return;
+        const confirm = await vscode.window.showWarningMessage(`This will make a network request to fetch:\n${url}\n\nDevGotchi otherwise makes no network calls at all. Continue?`, 'Yes', 'No');
+        if (confirm !== 'Yes')
+            return;
+        try {
+            const response = await fetch(url.trim());
+            if (!response.ok) {
+                vscode.window.showErrorMessage(`Failed to fetch that URL (HTTP ${response.status}).`);
+                return;
+            }
+            const text = await response.text();
+            const result = devManager.importQuestPack(text);
+            if (result.success) {
+                vscode.window.showInformationMessage(result.message);
+            }
+            else {
+                vscode.window.showErrorMessage(result.message);
+            }
+            DeveloperPanel.currentPanel?.updateDeveloper();
+        }
+        catch {
+            vscode.window.showErrorMessage('Failed to fetch or parse that URL.');
+        }
+    }));
     // Register Vacation Mode toggle: freezes stat decay and streak-breaking
     // for people who can't code for a few days and don't want to come back to
     // a burnt-out avatar and a broken streak.
@@ -247,6 +721,20 @@ function activate(context) {
     // feedback wherever the project is already tracked.
     context.subscriptions.push(vscode.commands.registerCommand('devgotchi.sendFeedback', () => {
         vscode.env.openExternal(vscode.Uri.parse('https://github.com/johnfacey/vscode-devgotchi/issues/new'));
+    }));
+    // Register the GitHub Sponsors link, same pattern as the feedback link
+    // above — DevGotchi stays free forever with no accounts or IAP, so this is
+    // just an external link for anyone who wants to support development. Also
+    // grants a small, once-per-day in-game coffee bonus for checking it out —
+    // see DeveloperManager.supportOnSponsors for why it's framed that way
+    // instead of gating on an unverifiable "did they actually sponsor" check.
+    context.subscriptions.push(vscode.commands.registerCommand('devgotchi.openSponsors', () => {
+        vscode.env.openExternal(vscode.Uri.parse('https://github.com/sponsors/johnfacey'));
+        const result = devManager.supportOnSponsors();
+        if (result.success) {
+            vscode.window.showInformationMessage(result.message);
+        }
+        DeveloperPanel.currentPanel?.updateDeveloper();
     }));
     // Register Team Mode toggle. teamManager only exists once a git repo has
     // been detected (see the Git Integration block below) — if someone runs
@@ -299,9 +787,22 @@ function activate(context) {
     context.subscriptions.push({ dispose: () => clearInterval(focusTickInterval) });
     // Listen for file saves to reward the user
     context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(() => {
+        devManager.recordActivity();
         devManager.onCodeSaved();
+        devManager.updateLongFileCount(countOpenLongFiles());
         updateStatusBar();
     }));
+    // Idle detection input: there's no OS-level AFK API for extensions, so
+    // this is a best-effort proxy for "the user is actually here" —
+    // selection change fires on nearly every keystroke/cursor move, so it's
+    // the primary signal; editor switches and regaining window focus cover
+    // the rest. See DeveloperManager.recordActivity / isIdle, used by
+    // updateStats() to pause decay (and put the avatar to sleep) once nothing
+    // has fired for a while — going to lunch shouldn't tank your stats.
+    context.subscriptions.push(vscode.window.onDidChangeTextEditorSelection(() => devManager.recordActivity()));
+    context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => devManager.recordActivity()));
+    context.subscriptions.push(vscode.window.onDidChangeWindowState(state => { if (state.focused)
+        devManager.recordActivity(); }));
     // The "Passive Loop": Update stats every 30 seconds
     const interval = setInterval(() => {
         devManager.updateStats();
@@ -323,7 +824,17 @@ function activate(context) {
                 teamManager = new TeamManager(context, repo.rootUri.fsPath, git.git?.path || 'git');
             }
             let lastHead = repo.state.HEAD?.commit;
+            // Merge Conflict Kraken: HP is just the live count of files with
+            // unresolved conflicts, sourced straight from the git extension's own
+            // `mergeChanges` — same "derived from real repo state" idea as the Bug
+            // Boss above. A conflicted merge/rebase doesn't necessarily move HEAD,
+            // so this is checked on every state change, not just the HEAD-moved
+            // branch below.
+            devManager.setInitialConflictCount((repo.state.mergeChanges || []).length);
             repo.state.onDidChange(() => {
+                devManager.updateConflictCount((repo.state.mergeChanges || []).length);
+                updateStatusBar();
+                DeveloperPanel.currentPanel?.updateDeveloper();
                 const currentHead = repo.state.HEAD?.commit;
                 if (currentHead && currentHead !== lastHead) {
                     lastHead = currentHead;
@@ -332,6 +843,23 @@ function activate(context) {
                     // Fire-and-forget: writes the current user's own snapshot file
                     // (no-op if Team Mode isn't enabled for this workspace).
                     teamManager?.writeSnapshot(devManager.getDeveloper());
+                    // Seasonal events (e.g. Hacktoberfest): ask the git extension for
+                    // this commit's message and see if it looks like a merged PR.
+                    // Best-effort — wrapped defensively since getCommit isn't
+                    // something we want able to break commit handling if it ever
+                    // throws or isn't available on some git extension version.
+                    try {
+                        Promise.resolve(repo.getCommit(currentHead)).then((commit) => {
+                            if (commit?.message) {
+                                devManager.onPossiblePRMerge(commit.message);
+                                updateStatusBar();
+                                DeveloperPanel.currentPanel?.updateDeveloper();
+                            }
+                        }, () => { });
+                    }
+                    catch {
+                        // Ignore — seasonal quest progress just won't tick for this commit.
+                    }
                 }
             });
         };
@@ -350,6 +878,20 @@ function activate(context) {
         devManager.updateErrorCount(getErrorCount());
         updateStatusBar();
     }));
+    // Code Smell Boss: also recheck on open/close (save is already wired up
+    // above, via countOpenLongFiles — see its doc comment for why this is
+    // scoped to open documents rather than a workspace-wide scan).
+    devManager.setInitialLongFileCount(countOpenLongFiles());
+    context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(() => {
+        devManager.updateLongFileCount(countOpenLongFiles());
+        updateStatusBar();
+        DeveloperPanel.currentPanel?.updateDeveloper();
+    }));
+    context.subscriptions.push(vscode.workspace.onDidCloseTextDocument(() => {
+        devManager.updateLongFileCount(countOpenLongFiles());
+        updateStatusBar();
+        DeveloperPanel.currentPanel?.updateDeveloper();
+    }));
 }
 // ── WHAT'S NEW ──────────────────────────────────────────────────────────
 // Bump WHATS_NEW_VERSION and update WHATS_NEW_ITEMS whenever a release adds
@@ -357,10 +899,12 @@ function activate(context) {
 // sync with package.json's "version" — there's no build step wiring the two
 // together, so it's a manual pair (same tradeoff the codebase already makes
 // elsewhere, e.g. duplicated color constants across the webview template).
-const WHATS_NEW_VERSION = '2.4.0';
+const WHATS_NEW_VERSION = '2.8.0';
 const WHATS_NEW_ITEMS = [
-    { icon: '📅', title: 'Activity Calendar', desc: 'A GitHub-style heatmap of your last year of coding activity, right on the main panel.' },
-    { icon: '🧙', title: '6 New Skins', desc: 'Code Wizard, Debug Ninja, Autobuild Mode, Alien Contractor, Night Shift, and Principal Engineer join the Coffee Shop.' }
+    { icon: '📖', title: 'The Legacy Code Dungeon', desc: 'A 7-chapter narrative questline — one chapter unlocks per day as you complete each objective.' },
+    { icon: '🎁', title: 'Community Quest Packs', desc: 'Import shareable JSON quest packs from a file or URL — try the bundled "100 Days of Code" pack.' },
+    { icon: '🎲', title: 'Boss Affixes', desc: 'A weekly mutator (Diablo-rift style) rotates automatically every Monday — this week’s shown right on the panel.' },
+    { icon: '💼', title: 'Timesheet Mode', desc: 'Export your real coding time as a billable-hours CSV, right from Settings.' }
 ];
 /**
  * Shows a one-time "What's New" panel to users who are upgrading from an
@@ -773,6 +1317,22 @@ function normalizeDeveloper(saved) {
         focusSprintMinutes: saved.focusSprintMinutes === undefined ? 0 : saved.focusSprintMinutes,
         totalFocusSprintsCompleted,
         activeErrorCount: saved.activeErrorCount === undefined ? 0 : saved.activeErrorCount,
+        mergeConflictCount: saved.mergeConflictCount === undefined ? 0 : saved.mergeConflictCount,
+        longFileCount: saved.longFileCount === undefined ? 0 : saved.longFileCount,
+        prestigeCount: saved.prestigeCount === undefined ? 0 : saved.prestigeCount,
+        lastSponsorClickAt: saved.lastSponsorClickAt === undefined ? 0 : saved.lastSponsorClickAt,
+        lastYearlyRecapAt: saved.lastYearlyRecapAt === undefined ? Date.now() : saved.lastYearlyRecapAt,
+        lastYearlyRecap: saved.lastYearlyRecap && typeof saved.lastYearlyRecap === 'object' ? saved.lastYearlyRecap : undefined,
+        longestStreak: saved.longestStreak === undefined ? (saved.streak || 0) : saved.longestStreak,
+        totalBossesDefeated: saved.totalBossesDefeated === undefined ? 0 : saved.totalBossesDefeated,
+        hourlyActivity: Array.isArray(saved.hourlyActivity) && saved.hourlyActivity.length === 24 ? saved.hourlyActivity : new Array(24).fill(0),
+        legacyDungeonChapter: saved.legacyDungeonChapter === undefined ? 1 : saved.legacyDungeonChapter,
+        legacyDungeonProgress: saved.legacyDungeonProgress === undefined ? 0 : saved.legacyDungeonProgress,
+        legacyDungeonChapterCompletedAt: saved.legacyDungeonChapterCompletedAt === undefined ? 0 : saved.legacyDungeonChapterCompletedAt,
+        legacyDungeonCompleted: saved.legacyDungeonCompleted === undefined ? false : saved.legacyDungeonCompleted,
+        packQuests: Array.isArray(saved.packQuests) ? saved.packQuests : [],
+        importedQuestPackIds: Array.isArray(saved.importedQuestPackIds) ? saved.importedQuestPackIds : [],
+        dailyMinutesCoded: saved.dailyMinutesCoded && typeof saved.dailyMinutesCoded === 'object' ? saved.dailyMinutesCoded : {},
         totalXpEarned,
         lastWeeklyRecapAt: saved.lastWeeklyRecapAt === undefined ? Date.now() : saved.lastWeeklyRecapAt,
         vacationMode: saved.vacationMode === undefined ? false : saved.vacationMode,
@@ -780,6 +1340,7 @@ function normalizeDeveloper(saved) {
         activityDates: saved.activityDates && typeof saved.activityDates === 'object' ? saved.activityDates : {},
         characterClass: typeof saved.characterClass === 'string' && CLASSES.some(c => c.id === saved.characterClass) ? saved.characterClass : null,
         lastWeeklyRecap: saved.lastWeeklyRecap && typeof saved.lastWeeklyRecap === 'object' ? saved.lastWeeklyRecap : undefined,
+        seasonalProgress: saved.seasonalProgress && typeof saved.seasonalProgress === 'object' ? saved.seasonalProgress : {},
         weeklyRecapSnapshot: saved.weeklyRecapSnapshot || {
             level,
             totalXpEarned,
@@ -797,6 +1358,10 @@ function normalizeDeveloper(saved) {
 class DeveloperManager {
     constructor(context) {
         this.lastErrorCount = 0;
+        this.lastConflictCount = 0;
+        this.lastLongFileCount = 0;
+        this.lastErrorIncreaseAt = 0; // Timestamp a lint/build error last appeared — drives the secret "Quick Draw" achievement
+        this.lastActivityAt = Date.now(); // Last real editor activity — drives idle detection (see recordActivity/isIdle)
         this.context = context;
         this.developer = this.loadDeveloper();
         this.settings = this.loadSettings();
@@ -901,18 +1466,24 @@ class DeveloperManager {
     /**
      * Checks all achievements and unlocks any newly earned ones.
      */
+    /**
+     * Unlocks a single achievement by id, if not already earned. Shared by
+     * checkAchievements() below and by triggers that unlock a specific
+     * achievement directly outside the general sweep (e.g. a secret
+     * achievement tied to a narrow timing window).
+     */
+    unlockAchievement(id) {
+        if (this.developer.achievements.includes(id))
+            return;
+        this.developer.achievements.push(id);
+        const ach = ACHIEVEMENTS.find(a => a.id === id);
+        this.addLog(`Achievement unlocked: ${ach.icon} ${ach.name}`, 'achievement');
+        if (!this.settings.reduceNotifications) {
+            vscode.window.showInformationMessage(`${this.classTag()}🏅 Achievement Unlocked: ${ach.icon} ${ach.name} — ${ach.description}`);
+        }
+    }
     checkAchievements() {
-        const earned = this.developer.achievements;
-        const unlock = (id) => {
-            if (earned.includes(id))
-                return;
-            earned.push(id);
-            const ach = ACHIEVEMENTS.find(a => a.id === id);
-            this.addLog(`Achievement unlocked: ${ach.icon} ${ach.name}`, 'achievement');
-            if (!this.settings.reduceNotifications) {
-                vscode.window.showInformationMessage(`🏅 Achievement Unlocked: ${ach.icon} ${ach.name} — ${ach.description}`);
-            }
-        };
+        const unlock = (id) => this.unlockAchievement(id);
         if (this.developer.totalBugsFixed >= 1)
             unlock('first_save'); // reuse as first activity
         if (this.developer.totalCommits >= 1)
@@ -937,6 +1508,8 @@ class DeveloperManager {
             unlock('quest_streak_5');
         if ((this.developer.totalFocusSprintsCompleted || 0) >= 10)
             unlock('focus_sprints_10');
+        if (new Date().getHours() === 3)
+            unlock('night_owl'); // secret: coding between 3am-4am local time
         this.maybeShowReviewPrompt();
     }
     /**
@@ -993,7 +1566,7 @@ class DeveloperManager {
             const ach = ACHIEVEMENTS.find(a => a.id === 'survived_burnout');
             this.addLog('✅ Recovered from burnout!', 'burnout');
             if (!this.settings.reduceNotifications) {
-                vscode.window.showInformationMessage(`🏅 Achievement Unlocked: ${ach.icon} ${ach.name} — ${ach.description}`);
+                vscode.window.showInformationMessage(`${this.classTag()}🏅 Achievement Unlocked: ${ach.icon} ${ach.name} — ${ach.description}`);
             }
         }
     }
@@ -1047,33 +1620,49 @@ class DeveloperManager {
             this.saveDeveloper();
             return;
         }
+        // Idle detection: no real editor activity for IDLE_THRESHOLD_MS reads as
+        // "stepped away" (lunch, a meeting) rather than "still coding." Unlike
+        // Vacation Mode above, this doesn't touch lastDailyBonus/lastWeeklyRecapAt
+        // — a short AFK gap shouldn't affect streak/recap timing, only decay —
+        // so it just bridges lastUpdated forward to skip this tick's decay and
+        // puts the avatar visibly to sleep. Resumes normally the moment activity
+        // is recorded again.
+        if (this.isIdle()) {
+            this.developer.lastUpdated = now;
+            this.developer.mood = 'sleeping';
+            this.saveDeveloper();
+            return;
+        }
         const hoursPassed = (now - this.developer.lastUpdated) / (1000 * 60 * 60);
         const decayMultiplier = DECAY_RATE_MULTIPLIERS[this.settings.decayRate];
-        let energyDecay = 4 * decayMultiplier;
+        const affix = getActiveBossAffix();
+        const affixDecayMultiplier = affix.decayMultiplier ?? 1;
+        let energyDecay = 4 * decayMultiplier * affixDecayMultiplier;
         if (this.developer.inventory.includes('furn_chair'))
             energyDecay *= 0.85;
         if (this.developer.characterClass === 'devops_paladin')
             energyDecay *= 0.85; // Built for uptime
-        let motivationDecay = 2 * decayMultiplier;
+        let motivationDecay = 2 * decayMultiplier * affixDecayMultiplier;
         if (this.developer.inventory.includes('acc_keyboard'))
             motivationDecay *= 0.85;
         if (this.developer.characterClass === 'devops_paladin')
             motivationDecay *= 0.85; // Built for uptime
         this.developer.energy = Math.max(0, this.developer.energy - hoursPassed * energyDecay);
         this.developer.motivation = Math.max(0, this.developer.motivation - hoursPassed * motivationDecay);
-        let focusDecay = (this.developer.skills.includes('iron_focus') ? 2.1 : 3) * decayMultiplier; // 30% slower
+        let focusDecay = (this.developer.skills.includes('iron_focus') ? 2.1 : 3) * decayMultiplier * affixDecayMultiplier; // 30% slower
         if (this.isFocusSprintActive())
             focusDecay *= 0.5; // Deep work protects your Focus stat
         this.developer.focus = Math.max(0, this.developer.focus - hoursPassed * focusDecay);
         // Linter Stress: Active errors drain energy and motivation over time
         if (this.lastErrorCount > 0) {
-            const stressFactor = this.lastErrorCount * 0.05 * decayMultiplier;
+            const stressFactor = this.lastErrorCount * 0.05 * decayMultiplier * (affix.bugStressMultiplier ?? 1);
             this.developer.energy = Math.max(0, this.developer.energy - stressFactor);
             this.developer.motivation = Math.max(0, this.developer.motivation - stressFactor);
         }
         // Track active coding time for quests (ignore offline time > 5 mins)
         if (hoursPassed < 0.083) {
             this.updateQuestProgress('time', hoursPassed * 60);
+            this.recordTimesheetMinutes(hoursPassed * 60);
         }
         this.checkDailyBonus();
         this.developer.health = (this.developer.energy + this.developer.motivation + this.developer.focus) / 3;
@@ -1084,6 +1673,11 @@ class DeveloperManager {
         this.checkFocusSprintCompletion();
         this.checkAchievements();
         this.checkWeeklyRecap();
+        this.checkYearlyRecap();
+        // 'panel_open' events (e.g. April Fools') just need DevGotchi to be
+        // running that day — this ticks every ~30s while active, but
+        // progressSeasonalEvent no-ops once the (target 1) quest is completed.
+        this.progressSeasonalEvent('panel_open', 1);
         this.saveDeveloper();
     }
     /**
@@ -1131,7 +1725,7 @@ class DeveloperManager {
             const summary = parts.join(' · ');
             this.addLog(`📊 Weekly recap: ${summary}`, 'event');
             if (this.settings.weeklyRecapEnabled) {
-                vscode.window.showInformationMessage(`📊 Your week with ${this.developer.name}: ${summary}`, 'Share Recap').then(choice => {
+                vscode.window.showInformationMessage(`${this.classTag()}📊 Your week with ${this.developer.name}: ${summary}`, 'Share Recap').then(choice => {
                     if (choice === 'Share Recap') {
                         vscode.commands.executeCommand('devgotchi.openWeeklyRecap');
                     }
@@ -1150,6 +1744,47 @@ class DeveloperManager {
         };
     }
     /**
+     * Once every ~365 days, surfaces "Year in Code Wrapped" — a Spotify-
+     * Wrapped-style summary. Unlike the weekly recap, this is lifetime-to-date
+     * totals rather than a delta (see YearlyRecapResult), so there's no
+     * snapshot to reset — just recompute and store the latest totals.
+     */
+    checkYearlyRecap() {
+        const last = this.developer.lastYearlyRecapAt || 0;
+        if (Date.now() - last < YEARLY_RECAP_INTERVAL_MS)
+            return;
+        const hourly = this.developer.hourlyActivity || [];
+        let mostProductiveHour = 0;
+        let mostProductiveCount = -1;
+        for (let h = 0; h < hourly.length; h++) {
+            if (hourly[h] > mostProductiveCount) {
+                mostProductiveCount = hourly[h];
+                mostProductiveHour = h;
+            }
+        }
+        const hadActivity = (this.developer.totalXpEarned || 0) > 0;
+        this.developer.lastYearlyRecap = {
+            generatedAt: Date.now(),
+            level: this.developer.level,
+            totalXpEarned: this.developer.totalXpEarned || 0,
+            totalCommits: this.developer.totalCommits || 0,
+            totalBugsFixed: this.developer.totalBugsFixed || 0,
+            totalFocusSprintsCompleted: this.developer.totalFocusSprintsCompleted || 0,
+            totalBossesDefeated: this.developer.totalBossesDefeated || 0,
+            longestStreak: this.developer.longestStreak || 0,
+            mostProductiveHour,
+            achievementsUnlocked: this.developer.achievements.length
+        };
+        if (hadActivity && this.settings.weeklyRecapEnabled) {
+            vscode.window.showInformationMessage(`${this.classTag()}🎁 Your Year in Code Wrapped is ready — Level ${this.developer.level}, ${this.developer.totalXpEarned} XP, ${this.developer.totalBossesDefeated || 0} bosses defeated.`, 'View Wrapped').then(choice => {
+                if (choice === 'View Wrapped') {
+                    vscode.commands.executeCommand('devgotchi.openYearlyRecap');
+                }
+            });
+        }
+        this.developer.lastYearlyRecapAt = Date.now();
+    }
+    /**
      * Whether a Focus Sprint is currently running.
      */
     isFocusSprintActive() {
@@ -1160,6 +1795,17 @@ class DeveloperManager {
      */
     isVacationModeActive() {
         return !!this.developer.vacationMode;
+    }
+    /**
+     * Marks real editor activity "now" — called from the workspace/window
+     * event listeners wired up in activate(). See IDLE_THRESHOLD_MS.
+     */
+    recordActivity() {
+        this.lastActivityAt = Date.now();
+    }
+    /** Whether no real editor activity has been seen for IDLE_THRESHOLD_MS. */
+    isIdle() {
+        return Date.now() - this.lastActivityAt >= IDLE_THRESHOLD_MS;
     }
     /**
      * Toggles Vacation Mode on/off. While on, updateStats() freezes stat decay,
@@ -1236,12 +1882,14 @@ class DeveloperManager {
         const endsAt = this.developer.focusSprintEndsAt || 0;
         if (endsAt > 0 && Date.now() >= endsAt) {
             this.developer.focusSprintEndsAt = 0;
-            this.developer.coffee += FOCUS_SPRINT_BONUS_COFFEE;
-            this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + FOCUS_SPRINT_BONUS_COFFEE;
+            const coffeeBonus = Math.round(FOCUS_SPRINT_BONUS_COFFEE * (getActiveBossAffix().sprintCoffeeMultiplier ?? 1));
+            this.developer.coffee += coffeeBonus;
+            this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + coffeeBonus;
             this.developer.totalFocusSprintsCompleted = (this.developer.totalFocusSprintsCompleted || 0) + 1;
             this.addXP(FOCUS_SPRINT_BONUS_XP);
-            this.addLog(`🎯 Focus Sprint complete! +${FOCUS_SPRINT_BONUS_XP} XP, +${FOCUS_SPRINT_BONUS_COFFEE} ☕`, 'achievement');
-            vscode.window.showInformationMessage(`🎯 Focus Sprint complete! +${FOCUS_SPRINT_BONUS_XP} XP, +${FOCUS_SPRINT_BONUS_COFFEE} ☕ — nice focus.`);
+            this.addLog(`🎯 Focus Sprint complete! +${FOCUS_SPRINT_BONUS_XP} XP, +${coffeeBonus} ☕`, 'achievement');
+            this.progressSeasonalEvent('focus_sprints', 1);
+            vscode.window.showInformationMessage(`🎯 Focus Sprint complete! +${FOCUS_SPRINT_BONUS_XP} XP, +${coffeeBonus} ☕ — nice focus.`);
         }
     }
     /**
@@ -1279,11 +1927,25 @@ class DeveloperManager {
             else {
                 this.developer.streak = 1;
             }
-            const bonus = 20 + (this.developer.streak * 5);
+            this.developer.longestStreak = Math.max(this.developer.longestStreak || 0, this.developer.streak);
+            const bonus = Math.round((20 + (this.developer.streak * 5)) * (getActiveBossAffix().dailyBonusMultiplier ?? 1));
             this.developer.coffee += bonus;
             this.developer.lastDailyBonus = now;
             this.generateDailyQuests();
-            vscode.window.showInformationMessage(`🌞 Daily Login Bonus! +${bonus} ☕ (Streak: ${this.developer.streak} days)`);
+            const paladinFlavor = this.developer.characterClass === 'devops_paladin' ? ' — your uptime never wavered.' : '';
+            // Daily Login Calendar: a repeating 30-day cycle laid on top of the
+            // streak above (see renderDailyCalendar in the webview) — day 30 of
+            // every cycle pays a big one-time bonus on top of the normal one.
+            const dayInCycle = ((this.developer.streak - 1) % DAILY_CALENDAR_CYCLE_LENGTH) + 1;
+            let milestoneFlavor = '';
+            if (dayInCycle === DAILY_CALENDAR_CYCLE_LENGTH) {
+                this.addXP(DAILY_CALENDAR_MILESTONE_BONUS_XP);
+                this.developer.coffee += DAILY_CALENDAR_MILESTONE_BONUS_COFFEE;
+                this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + DAILY_CALENDAR_MILESTONE_BONUS_COFFEE;
+                this.addLog(`📅 Day 30 calendar bonus! +${DAILY_CALENDAR_MILESTONE_BONUS_XP} XP, +${DAILY_CALENDAR_MILESTONE_BONUS_COFFEE} ☕`, 'achievement');
+                milestoneFlavor = ` — 📅 Day 30 calendar bonus: +${DAILY_CALENDAR_MILESTONE_BONUS_XP} XP, +${DAILY_CALENDAR_MILESTONE_BONUS_COFFEE} ☕! 🎉`;
+            }
+            vscode.window.showInformationMessage(`${this.classTag()}🌞 Daily Login Bonus! +${bonus} ☕ (Streak: ${this.developer.streak} days)${paladinFlavor}${milestoneFlavor}`);
         }
     }
     /**
@@ -1335,6 +1997,26 @@ class DeveloperManager {
         }
     }
     /**
+     * "Buy the dev a coffee": opens GitHub Sponsors (see the devgotchi.openSponsors
+     * command) and, once per day, grants a small in-game coffee-bean bonus for
+     * checking the page out. There's no way for a VS Code extension to verify
+     * an actual sponsorship happened, so this deliberately rewards clicking
+     * through rather than paying — monetization framed as a game mechanic, not
+     * a paywall gated on something we can't check anyway.
+     */
+    supportOnSponsors() {
+        const last = this.developer.lastSponsorClickAt || 0;
+        if (Date.now() - last < SPONSOR_CLICK_COOLDOWN_MS) {
+            return { success: false, message: '' };
+        }
+        this.developer.lastSponsorClickAt = Date.now();
+        this.developer.coffee += SPONSOR_CLICK_COFFEE_BONUS;
+        this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + SPONSOR_CLICK_COFFEE_BONUS;
+        this.addLog(`💖 Checked out GitHub Sponsors  +${SPONSOR_CLICK_COFFEE_BONUS} ☕`, 'coffee');
+        this.saveDeveloper();
+        return { success: true, message: `💖 +${SPONSOR_CLICK_COFFEE_BONUS} ☕ — thanks for checking out GitHub Sponsors!` };
+    }
+    /**
      * Action: Spend coffee beans to boost energy and focus.
      */
     giveCoffee() {
@@ -1370,7 +2052,7 @@ class DeveloperManager {
             this.developer.achievements.push('first_save');
             const ach = ACHIEVEMENTS.find(a => a.id === 'first_save');
             if (!this.settings.reduceNotifications) {
-                vscode.window.showInformationMessage(`🏅 Achievement Unlocked: ${ach.icon} ${ach.name}`);
+                vscode.window.showInformationMessage(`${this.classTag()}🏅 Achievement Unlocked: ${ach.icon} ${ach.name}`);
             }
         }
         this.developer.motivation = Math.min(100, this.developer.motivation + 3);
@@ -1382,6 +2064,11 @@ class DeveloperManager {
         this.updateQuestProgress('save');
         this.checkAchievements();
         this.saveDeveloper();
+        // Saves fire far too often for a modal toast, so the Rogue's bonus gets a
+        // quick, self-dismissing status bar flash instead of an interruption.
+        if (this.developer.characterClass === 'frontend_rogue') {
+            vscode.window.setStatusBarMessage(`🗡️ Frontend Rogue +${saveXp} XP (save bonus)`, 2500);
+        }
     }
     /**
      * Event: Triggered when a git commit or merge is detected.
@@ -1396,8 +2083,102 @@ class DeveloperManager {
         this.addLog(`📦 Git commit  +${commitXp} XP  +5 ☕`, 'xp');
         this.updateQuestProgress('commit');
         this.checkAchievements();
+        this.progressSeasonalEvent('commits', 1);
         this.saveDeveloper();
-        vscode.window.showInformationMessage(`Git Activity! +${commitXp} XP, +5 ☕`);
+        const mageFlavor = this.developer.characterClass === 'backend_mage' ? ' — channels extra power!' : '';
+        vscode.window.showInformationMessage(`${this.classTag()}Git Activity! +${commitXp} XP, +5 ☕${mageFlavor}`);
+    }
+    /**
+     * Best-effort seasonal event hook: called with a commit's message whenever
+     * HEAD moves. If there's an active 'pr_merge' event and the message looks
+     * like a merged PR — GitHub's default "Merge pull request #123 from ..."
+     * merge commit, or a squash-merge's trailing "(#123)" — progress that
+     * event's quest. No GitHub API involved, so this only sees PRs actually
+     * merged into the branch you have checked out locally; it can't detect
+     * merges elsewhere or a merge method that produces neither pattern (e.g.
+     * a bare rebase-and-merge with a manually written subject). That's an
+     * accepted trade-off to keep the extension server-free.
+     */
+    onPossiblePRMerge(commitMessage) {
+        const subject = (commitMessage.split('\n')[0] || '').trim();
+        const looksLikeMergedPR = /^Merge pull request #\d+/i.test(subject) || /\(#\d+\)\s*$/.test(subject);
+        if (!looksLikeMergedPR)
+            return;
+        this.progressSeasonalEvent('pr_merge', 1);
+    }
+    /**
+     * Shared engine for every seasonal event's quest. No-ops unless the
+     * currently active event (if any) matches `questType`, so callers can
+     * always call this unconditionally on their trigger (a PR merge, a bug
+     * fix, ...) without checking what's active themselves.
+     */
+    progressSeasonalEvent(questType, amount) {
+        if (amount <= 0)
+            return;
+        const event = getActiveSeasonalEvent();
+        if (!event || event.questType !== questType)
+            return;
+        const instanceId = seasonalEventInstanceId(event);
+        if (!this.developer.seasonalProgress)
+            this.developer.seasonalProgress = {};
+        const entry = this.developer.seasonalProgress[instanceId] || { progress: 0, completed: false };
+        if (entry.completed)
+            return;
+        entry.progress += amount;
+        if (event.perTickReward) {
+            this.addXP(event.perTickReward.xp);
+            this.developer.coffee += event.perTickReward.coffee;
+            this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + event.perTickReward.coffee;
+        }
+        const unit = amount === 1 ? event.progressUnitSingular : event.progressUnitPlural;
+        if (entry.progress >= event.questTarget) {
+            entry.progress = event.questTarget;
+            entry.completed = true;
+            if (!this.developer.inventory.includes(event.skinId))
+                this.developer.inventory.push(event.skinId);
+            this.addLog(`${event.emoji} ${event.name} complete — earned ${event.skinEmoji} ${event.skinName}!`, 'achievement');
+            vscode.window.showInformationMessage(`${event.emoji} ${event.name} complete! You've earned the ${event.skinEmoji} ${event.skinName} skin — equip it from the Shop.`);
+        }
+        else {
+            this.addLog(`${event.emoji} ${event.name}: ${amount} ${unit} ${event.progressVerb} (${entry.progress}/${event.questTarget})`, 'xp');
+            if (event.showToastOnProgress) {
+                const rewardText = event.perTickReward ? ` +${event.perTickReward.xp} XP, +${event.perTickReward.coffee} ☕` : '';
+                vscode.window.showInformationMessage(`${event.emoji} ${event.name}: ${amount} ${unit} ${event.progressVerb}!${rewardText} (${entry.progress}/${event.questTarget})`);
+            }
+        }
+        this.developer.seasonalProgress[instanceId] = entry;
+        this.saveDeveloper();
+    }
+    /**
+     * Current seasonal event status for the panel, or null if none is active
+     * right now.
+     */
+    getSeasonalStatus() {
+        const event = getActiveSeasonalEvent();
+        if (!event)
+            return null;
+        const instanceId = seasonalEventInstanceId(event);
+        const entry = (this.developer.seasonalProgress || {})[instanceId] || { progress: 0, completed: false };
+        return {
+            id: event.id,
+            name: event.name,
+            emoji: event.emoji,
+            questLabel: event.questLabel,
+            target: event.questTarget,
+            progress: Math.min(entry.progress, event.questTarget),
+            completed: entry.completed,
+            skinName: event.skinName,
+            skinEmoji: event.skinEmoji,
+            bannerGradientStart: event.bannerGradientStart,
+            bannerGradientEnd: event.bannerGradientEnd,
+            bannerTextColor: event.bannerTextColor,
+            accentColor: event.accentColor
+        };
+    }
+    /** This week's Boss Affix, for the panel banner. Always present — see getActiveBossAffix. */
+    getBossAffixStatus() {
+        const affix = getActiveBossAffix();
+        return { id: affix.id, name: affix.name, emoji: affix.emoji, description: affix.description };
     }
     setInitialErrorCount(count) {
         this.lastErrorCount = count;
@@ -1420,49 +2201,294 @@ class DeveloperManager {
             this.developer.totalBugsFixed = (this.developer.totalBugsFixed || 0) + fixed;
             this.addLog(`🐛 Fixed ${fixed} bug${fixed > 1 ? 's' : ''}  +${fixed * 5 * xpMult} XP`, 'xp');
             this.updateQuestProgress('fix', fixed);
+            // Secret: fixed within 60s of an error appearing — best-effort, since
+            // several errors could be in flight at once and this just checks the
+            // most recent appearance, not which specific one got fixed.
+            if (this.lastErrorIncreaseAt && Date.now() - this.lastErrorIncreaseAt <= 60000) {
+                this.unlockAchievement('quick_draw');
+            }
             this.checkAchievements();
+            this.progressSeasonalEvent('bugs_fixed', fixed);
             vscode.window.setStatusBarMessage(`Bug squashed! +${fixed * 5 * xpMult} XP 🐛`, 3000);
             // Bug Boss defeated: every active error just got cleared.
             if (currentErrors === 0 && previousErrors > 0) {
-                this.addXP(BUG_BOSS_DEFEAT_BONUS_XP);
-                this.developer.coffee += BUG_BOSS_DEFEAT_BONUS_COFFEE;
-                this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + BUG_BOSS_DEFEAT_BONUS_COFFEE;
-                this.addLog(`👾 Bug Boss defeated! +${BUG_BOSS_DEFEAT_BONUS_XP} XP, +${BUG_BOSS_DEFEAT_BONUS_COFFEE} ☕`, 'achievement');
-                vscode.window.showInformationMessage(`👾 Bug Boss defeated! +${BUG_BOSS_DEFEAT_BONUS_XP} XP, +${BUG_BOSS_DEFEAT_BONUS_COFFEE} ☕ — your code is clean.`);
+                const xpBonus = this.applyBossBonusAffix(BUG_BOSS_DEFEAT_BONUS_XP);
+                const coffeeBonus = this.applyBossBonusAffix(BUG_BOSS_DEFEAT_BONUS_COFFEE);
+                this.addXP(xpBonus);
+                this.developer.coffee += coffeeBonus;
+                this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + coffeeBonus;
+                this.developer.totalBossesDefeated = (this.developer.totalBossesDefeated || 0) + 1;
+                this.addLog(`👾 Bug Boss defeated! +${xpBonus} XP, +${coffeeBonus} ☕`, 'achievement');
+                vscode.window.showInformationMessage(`👾 Bug Boss defeated! +${xpBonus} XP, +${coffeeBonus} ☕ — your code is clean.`);
             }
         }
         else if (diff > 0) {
             // New bugs introduced - slight focus hit
             this.developer.focus = Math.max(0, this.developer.focus - (diff * 0.5));
+            this.lastErrorIncreaseAt = Date.now();
         }
         this.lastErrorCount = currentErrors;
         this.developer.activeErrorCount = currentErrors;
         this.saveDeveloper();
     }
+    setInitialConflictCount(count) {
+        this.lastConflictCount = count;
+        this.developer.mergeConflictCount = count;
+    }
+    /**
+     * Live "Merge Conflict Kraken" HP is the real count of files with
+     * unresolved git merge conflicts (sourced from the git extension's
+     * `state.mergeChanges` — see hookRepo below) — same "actual repo state as
+     * boss HP" pattern as the Bug Boss above.
+     */
+    updateConflictCount(currentConflicts) {
+        const diff = currentConflicts - this.lastConflictCount;
+        const previousConflicts = this.lastConflictCount;
+        if (diff < 0) {
+            const resolved = Math.abs(diff);
+            this.addXP(resolved * 8);
+            this.developer.motivation = Math.min(100, this.developer.motivation + resolved * 2);
+            this.addLog(`🐙 Resolved ${resolved} merge conflict${resolved > 1 ? 's' : ''}  +${resolved * 8} XP`, 'xp');
+            // Merge Conflict Kraken defeated: every conflicted file just got resolved.
+            if (currentConflicts === 0 && previousConflicts > 0) {
+                const xpBonus = this.applyBossBonusAffix(MERGE_KRAKEN_DEFEAT_BONUS_XP);
+                const coffeeBonus = this.applyBossBonusAffix(MERGE_KRAKEN_DEFEAT_BONUS_COFFEE);
+                this.addXP(xpBonus);
+                this.developer.coffee += coffeeBonus;
+                this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + coffeeBonus;
+                this.developer.totalBossesDefeated = (this.developer.totalBossesDefeated || 0) + 1;
+                this.addLog(`🐙 Merge Conflict Kraken defeated! +${xpBonus} XP, +${coffeeBonus} ☕`, 'achievement');
+                vscode.window.showInformationMessage(`🐙 Merge Conflict Kraken defeated! +${xpBonus} XP, +${coffeeBonus} ☕ — the merge is clean.`);
+            }
+        }
+        else if (diff > 0) {
+            // A merge/rebase just surfaced new conflicts - slight focus hit
+            this.developer.focus = Math.max(0, this.developer.focus - diff);
+        }
+        this.lastConflictCount = currentConflicts;
+        this.developer.mergeConflictCount = currentConflicts;
+        this.saveDeveloper();
+    }
+    setInitialLongFileCount(count) {
+        this.lastLongFileCount = count;
+        this.developer.longFileCount = count;
+    }
+    /**
+     * Live "Code Smell Boss" HP is the count of currently-open files over
+     * LONG_FILE_LINE_THRESHOLD lines (see countOpenLongFiles) — same
+     * "actual repo state as boss HP" pattern as the Bug Boss and Merge
+     * Conflict Kraken above. Deliberately scoped to files VS Code already has
+     * open/loaded (free via TextDocument.lineCount, no disk I/O) rather than
+     * scanning the whole workspace — honest about what it can see, and cheap
+     * enough to recheck on every open/close/save without a debounce.
+     */
+    updateLongFileCount(currentCount) {
+        const diff = currentCount - this.lastLongFileCount;
+        const previousCount = this.lastLongFileCount;
+        if (diff < 0) {
+            const shrunk = Math.abs(diff);
+            this.addXP(shrunk * CODE_SMELL_REFACTOR_XP_PER_FILE);
+            this.developer.motivation = Math.min(100, this.developer.motivation + shrunk * 3);
+            this.addLog(`🧟 Refactored ${shrunk} bloated file${shrunk > 1 ? 's' : ''} under ${LONG_FILE_LINE_THRESHOLD} lines  +${shrunk * CODE_SMELL_REFACTOR_XP_PER_FILE} XP`, 'xp');
+            // Code Smell Boss defeated: every open file just dropped under the threshold.
+            if (currentCount === 0 && previousCount > 0) {
+                const xpBonus = this.applyBossBonusAffix(CODE_SMELL_BOSS_DEFEAT_BONUS_XP);
+                const coffeeBonus = this.applyBossBonusAffix(CODE_SMELL_BOSS_DEFEAT_BONUS_COFFEE);
+                this.addXP(xpBonus);
+                this.developer.coffee += coffeeBonus;
+                this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + coffeeBonus;
+                this.developer.totalBossesDefeated = (this.developer.totalBossesDefeated || 0) + 1;
+                this.addLog(`🧟 Code Smell Boss defeated! +${xpBonus} XP, +${coffeeBonus} ☕`, 'achievement');
+                vscode.window.showInformationMessage(`🧟 Code Smell Boss defeated! +${xpBonus} XP, +${coffeeBonus} ☕ — nothing bloated left open.`);
+            }
+        }
+        else if (diff > 0) {
+            // A file just grew past the threshold (or a bloated file got opened) - slight focus hit
+            this.developer.focus = Math.max(0, this.developer.focus - diff);
+        }
+        this.lastLongFileCount = currentCount;
+        this.developer.longFileCount = currentCount;
+        this.saveDeveloper();
+    }
     /**
      * Updates progress for active quests of a specific type.
      */
-    updateQuestProgress(type, amount = 1) {
+    /**
+     * Advances progress on any quest of `type` in `list` (daily quests, or a
+     * community Quest Pack — see importQuestPack), paying its reward (scaled
+     * by this week's Boss Affix questRewardMultiplier, if any) the moment it
+     * completes. Returns true if anything in the list changed, so callers can
+     * decide whether a save is needed.
+     */
+    advanceQuestList(list, type, amount) {
         let updated = false;
-        this.developer.quests.forEach(q => {
+        const rewardMultiplier = getActiveBossAffix().questRewardMultiplier ?? 1;
+        list.forEach(q => {
             if (q.type === type && !q.completed) {
                 q.progress += amount;
                 if (q.progress >= q.target) {
                     q.progress = q.target;
                     q.completed = true;
-                    this.developer.coffee += q.reward;
-                    vscode.window.showInformationMessage(`✅ Quest Complete: ${q.description} (+${q.reward} ☕)`);
+                    const reward = Math.round(q.reward * rewardMultiplier);
+                    this.developer.coffee += reward;
+                    vscode.window.showInformationMessage(`✅ Quest Complete: ${q.description} (+${reward} ☕)`);
                 }
                 updated = true;
             }
         });
+        return updated;
+    }
+    /**
+     * Advances "The Legacy Code Dungeon". Two phases:
+     *  1. Chapter in progress: accumulate progress toward its objective; on
+     *     completion, pay its reward and start the next-day gate.
+     *  2. Gate pending (legacyDungeonChapterCompletedAt is set): waits for a
+     *     new calendar day, then either unlocks the next chapter or, if that
+     *     was the last one, finishes the story and grants the exclusive skin.
+     * Runs on every quest-progress trigger regardless of type, since the gate
+     * check itself doesn't depend on which action fired it. Returns true if
+     * anything changed, so the caller knows whether to save.
+     */
+    advanceLegacyDungeon(type, amount) {
+        if (this.developer.legacyDungeonCompleted)
+            return false;
+        const chapterIndex = (this.developer.legacyDungeonChapter || 1) - 1;
+        const chapter = LEGACY_DUNGEON_CHAPTERS[chapterIndex];
+        if (!chapter)
+            return false;
+        const isLastChapter = chapterIndex + 1 >= LEGACY_DUNGEON_CHAPTERS.length;
+        if (this.developer.legacyDungeonChapterCompletedAt) {
+            const completedDay = new Date(this.developer.legacyDungeonChapterCompletedAt).toDateString();
+            const today = new Date().toDateString();
+            if (completedDay === today)
+                return false; // still gated until a new calendar day
+            if (isLastChapter) {
+                this.developer.legacyDungeonCompleted = true;
+                if (!this.developer.inventory.includes(LEGACY_DUNGEON_SKIN_ID))
+                    this.developer.inventory.push(LEGACY_DUNGEON_SKIN_ID);
+                this.addLog('📖 The Legacy Code Dungeon complete! Earned 💀 Legacy Slayer.', 'achievement');
+                vscode.window.showInformationMessage("📖 The Legacy Code Dungeon complete! You've earned the 💀 Legacy Slayer skin — equip it from the Shop.");
+                return true;
+            }
+            this.developer.legacyDungeonChapter = (this.developer.legacyDungeonChapter || 1) + 1;
+            this.developer.legacyDungeonProgress = 0;
+            this.developer.legacyDungeonChapterCompletedAt = 0;
+            const nextChapter = LEGACY_DUNGEON_CHAPTERS[this.developer.legacyDungeonChapter - 1];
+            this.addLog(`📖 Chapter ${this.developer.legacyDungeonChapter} unlocked: ${nextChapter.title}`, 'event');
+            vscode.window.showInformationMessage(`📖 Chapter ${this.developer.legacyDungeonChapter} unlocked: ${nextChapter.title}`);
+            return true;
+        }
+        if (chapter.type !== type)
+            return false;
+        this.developer.legacyDungeonProgress = (this.developer.legacyDungeonProgress || 0) + amount;
+        if (this.developer.legacyDungeonProgress >= chapter.target) {
+            this.developer.legacyDungeonProgress = chapter.target;
+            this.developer.legacyDungeonChapterCompletedAt = Date.now();
+            this.addXP(chapter.rewardXp);
+            this.developer.coffee += chapter.rewardCoffee;
+            this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + chapter.rewardCoffee;
+            const gateFlavor = isLastChapter ? " — the dungeon's final chapter awaits tomorrow." : ' — next chapter unlocks tomorrow.';
+            this.addLog(`📖 Chapter ${this.developer.legacyDungeonChapter} complete: ${chapter.title}  +${chapter.rewardXp} XP, +${chapter.rewardCoffee} ☕`, 'achievement');
+            vscode.window.showInformationMessage(`📖 Chapter ${this.developer.legacyDungeonChapter} complete: ${chapter.title}! +${chapter.rewardXp} XP, +${chapter.rewardCoffee} ☕${gateFlavor}`);
+        }
+        return true;
+    }
+    /**
+     * Current Legacy Dungeon status for the Story modal: the active chapter's
+     * narrative text/progress, whether it's gated waiting on a new day, and a
+     * compact list of every chapter's title + completion state for the
+     * table-of-contents view.
+     */
+    getLegacyDungeonStatus() {
+        const chapterNum = this.developer.legacyDungeonChapter || 1;
+        const chapter = LEGACY_DUNGEON_CHAPTERS[chapterNum - 1] || LEGACY_DUNGEON_CHAPTERS[LEGACY_DUNGEON_CHAPTERS.length - 1];
+        const completed = !!this.developer.legacyDungeonCompleted;
+        const gated = !completed && !!this.developer.legacyDungeonChapterCompletedAt;
+        return {
+            completed,
+            currentChapter: chapterNum,
+            totalChapters: LEGACY_DUNGEON_CHAPTERS.length,
+            gated,
+            title: chapter.title,
+            flavorText: chapter.flavorText,
+            objectiveType: chapter.type,
+            progress: Math.min(this.developer.legacyDungeonProgress || 0, chapter.target),
+            target: chapter.target,
+            rewardXp: chapter.rewardXp,
+            rewardCoffee: chapter.rewardCoffee,
+            chapters: LEGACY_DUNGEON_CHAPTERS.map((c, i) => ({
+                title: c.title,
+                state: completed || i + 1 < chapterNum ? 'completed' : (i + 1 === chapterNum ? 'current' : 'locked')
+            }))
+        };
+    }
+    /**
+     * Imports a community Quest Pack from raw JSON text (from a local file or
+     * a URL — see the two devgotchi.importQuestPack* commands). Validates and
+     * HTML-escapes everything via validateQuestPack before touching state;
+     * a pack already imported (by packId) is a no-op, not a duplicate import.
+     */
+    importQuestPack(jsonText) {
+        let raw;
+        try {
+            raw = JSON.parse(jsonText);
+        }
+        catch {
+            return { success: false, message: 'That file is not valid JSON.' };
+        }
+        const result = validateQuestPack(raw);
+        if ('error' in result) {
+            return { success: false, message: result.error };
+        }
+        const pack = result.pack;
+        if (!this.developer.importedQuestPackIds)
+            this.developer.importedQuestPackIds = [];
+        if (this.developer.importedQuestPackIds.includes(pack.packId)) {
+            return { success: false, message: `"${pack.packName}" is already imported.` };
+        }
+        if (!this.developer.packQuests)
+            this.developer.packQuests = [];
+        pack.quests.forEach(q => {
+            this.developer.packQuests.push({
+                id: `${pack.packId}__${q.id}`,
+                description: q.description,
+                type: q.type,
+                target: q.target,
+                progress: 0,
+                reward: q.reward,
+                completed: false,
+                packId: pack.packId,
+                packName: pack.packName
+            });
+        });
+        this.developer.importedQuestPackIds.push(pack.packId);
+        this.addLog(`🎁 Imported Quest Pack: ${pack.packName} (${pack.quests.length} quest${pack.quests.length === 1 ? '' : 's'})`, 'event');
+        this.saveDeveloper();
+        return { success: true, message: `🎁 Imported "${pack.packName}" — ${pack.quests.length} quest${pack.quests.length === 1 ? '' : 's'} added.` };
+    }
+    /** Removes every quest from a previously-imported pack (completed or not) and allows re-importing it later. */
+    removeQuestPack(packId) {
+        if (!this.developer.importedQuestPackIds?.includes(packId)) {
+            return { success: false, message: 'That pack is not currently imported.' };
+        }
+        this.developer.packQuests = (this.developer.packQuests || []).filter(q => q.packId !== packId);
+        this.developer.importedQuestPackIds = this.developer.importedQuestPackIds.filter(id => id !== packId);
+        this.saveDeveloper();
+        return { success: true, message: 'Quest Pack removed.' };
+    }
+    updateQuestProgress(type, amount = 1) {
+        let updated = this.advanceQuestList(this.developer.quests, type, amount);
+        if (this.developer.packQuests && this.developer.packQuests.length > 0) {
+            updated = this.advanceQuestList(this.developer.packQuests, type, amount) || updated;
+        }
+        updated = this.advanceLegacyDungeon(type, amount) || updated;
         // Check if all quests are completed for the day
         if (!this.developer.dailyQuestsCompleted && this.developer.quests.length > 0 && this.developer.quests.every(q => q.completed)) {
             this.developer.dailyQuestsCompleted = true;
             this.developer.questStreak = (this.developer.questStreak || 0) + 1;
             const bonus = 50 + (this.developer.questStreak * 10);
             this.developer.coffee += bonus;
-            vscode.window.showInformationMessage(`🎉 All Daily Quests Complete! +${bonus} ☕ (Quest Streak: ${this.developer.questStreak})`);
+            vscode.window.showInformationMessage(`${this.classTag()}🎉 All Daily Quests Complete! +${bonus} ☕ (Quest Streak: ${this.developer.questStreak})`);
             updated = true;
         }
         if (updated)
@@ -1477,6 +2503,22 @@ class DeveloperManager {
     }
     getCharacterClass() {
         return this.developer.characterClass;
+    }
+    getClassInfo() {
+        return CLASSES.find(c => c.id === this.developer.characterClass) || null;
+    }
+    /**
+     * Emoji prefix (with trailing space) for the developer's chosen class, or
+     * '' if unclassed — used to tag toasts so the class stays visible across
+     * the extension, not just inside the panel.
+     */
+    classTag() {
+        const info = this.getClassInfo();
+        return info ? `${info.emoji} ` : '';
+    }
+    /** Applies this week's Boss Affix bossBonusMultiplier (if any) to a boss-defeat XP/coffee bonus. */
+    applyBossBonusAffix(base) {
+        return Math.round(base * (getActiveBossAffix().bossBonusMultiplier ?? 1));
     }
     /**
      * Opens a class picker. Free the first time (no class set yet); after
@@ -1521,6 +2563,8 @@ class DeveloperManager {
         const item = SHOP_ITEMS.find(i => i.id === itemId);
         if (!item)
             return { success: false, message: 'Item not found' };
+        if (item.eventOnly)
+            return { success: false, message: 'This one can only be earned, not bought.' };
         if (this.developer.inventory.includes(itemId))
             return { success: false, message: 'Already owned' };
         if (this.developer.coffee < item.cost)
@@ -1575,7 +2619,8 @@ class DeveloperManager {
     recordDailyActivity() {
         if (!this.developer.activityDates)
             this.developer.activityDates = {};
-        const key = new Date().toISOString().slice(0, 10);
+        const now = new Date();
+        const key = now.toISOString().slice(0, 10);
         this.developer.activityDates[key] = (this.developer.activityDates[key] || 0) + 1;
         const keys = Object.keys(this.developer.activityDates);
         if (keys.length > 400) {
@@ -1585,6 +2630,62 @@ class DeveloperManager {
                 delete this.developer.activityDates[keys[i]];
             }
         }
+        // Same choke point doubles as the tally behind Year in Code Wrapped's
+        // "most productive hour" — a 24-length bucket by local hour-of-day.
+        if (!this.developer.hourlyActivity || this.developer.hourlyActivity.length !== 24) {
+            this.developer.hourlyActivity = new Array(24).fill(0);
+        }
+        this.developer.hourlyActivity[now.getHours()]++;
+    }
+    /**
+     * Per-day minutes-coded log behind Timesheet Mode (see exportTimesheetData).
+     * Called from the same "ignore offline time" gate as the quest time
+     * tracker in updateStats() — and since updateStats() early-returns during
+     * both Vacation Mode and idle detection before reaching that gate, this
+     * only accumulates while you're actually coding, not just while VS Code
+     * happens to be open.
+     */
+    recordTimesheetMinutes(minutes) {
+        if (!this.developer.dailyMinutesCoded)
+            this.developer.dailyMinutesCoded = {};
+        const key = new Date().toISOString().slice(0, 10);
+        this.developer.dailyMinutesCoded[key] = (this.developer.dailyMinutesCoded[key] || 0) + minutes;
+        const keys = Object.keys(this.developer.dailyMinutesCoded);
+        if (keys.length > 400) {
+            keys.sort();
+            const excess = keys.length - 370;
+            for (let i = 0; i < excess; i++) {
+                delete this.developer.dailyMinutesCoded[keys[i]];
+            }
+        }
+    }
+    /**
+     * Builds a CSV timesheet (Date,Hours + a Total row) from the tracked
+     * daily-minutes log, for `days` most recent days (or 'all'). Decimal
+     * hours, freelancer-CSV-style — DevGotchi doesn't know your billing rate,
+     * so it just hands over honest hours and lets you apply one yourself.
+     */
+    exportTimesheetData(days) {
+        const log = this.developer.dailyMinutesCoded || {};
+        const keys = Object.keys(log).sort();
+        let cutoffKey = null;
+        if (days !== 'all') {
+            const d = new Date();
+            d.setDate(d.getDate() - (days - 1));
+            cutoffKey = d.toISOString().slice(0, 10);
+        }
+        const rows = ['Date,Hours'];
+        let totalMinutes = 0;
+        keys.forEach(key => {
+            if (cutoffKey && key < cutoffKey)
+                return;
+            const minutes = log[key];
+            totalMinutes += minutes;
+            rows.push(`${key},${(minutes / 60).toFixed(2)}`);
+        });
+        rows.push('');
+        rows.push(`Total,${(totalMinutes / 60).toFixed(2)}`);
+        return rows.join('\n');
     }
     /**
      * Adds XP and handles leveling up logic.
@@ -1592,21 +2693,55 @@ class DeveloperManager {
     addXP(amount) {
         this.recordDailyActivity();
         const sprintMultiplier = this.isFocusSprintActive() ? FOCUS_SPRINT_XP_MULTIPLIER : 1;
-        const gained = Math.floor(amount * (1 + this.developer.energy / 100) * (1 + this.developer.focus / 100) * (1 + this.developer.motivation / 100) * sprintMultiplier);
+        const prestigeMultiplier = 1 + (this.developer.prestigeCount || 0) * PRESTIGE_XP_BONUS_PER_PRESTIGE;
+        const gained = Math.floor(amount * (1 + this.developer.energy / 100) * (1 + this.developer.focus / 100) * (1 + this.developer.motivation / 100) * sprintMultiplier * prestigeMultiplier);
         this.developer.xp += gained;
         this.developer.totalXpEarned = (this.developer.totalXpEarned || 0) + gained;
         let leveledUp = false;
         let xpNeeded = this.developer.level * 100;
-        while (this.developer.xp >= xpNeeded) {
+        // Level is capped at PRESTIGE_LEVEL_REQUIREMENT — past that, XP still
+        // accrues (visible as a full bar) but only Prestige moves you further.
+        while (this.developer.level < PRESTIGE_LEVEL_REQUIREMENT && this.developer.xp >= xpNeeded) {
             this.developer.level++;
             this.developer.xp -= xpNeeded;
             xpNeeded = this.developer.level * 100;
             leveledUp = true;
         }
+        if (this.developer.level >= PRESTIGE_LEVEL_REQUIREMENT) {
+            this.developer.xp = Math.min(this.developer.xp, xpNeeded);
+        }
         if (leveledUp) {
             this.addLog(`🎉 LEVEL UP → Level ${this.developer.level}!`, 'achievement');
-            vscode.window.showInformationMessage(`🎉 ${this.developer.name} leveled up to Level ${this.developer.level}!`);
+            vscode.window.showInformationMessage(`${this.classTag()}🎉 ${this.developer.name} leveled up to Level ${this.developer.level}!`);
         }
+    }
+    /**
+     * Prestige: available once Level cap is reached. Resets level/xp back to
+     * 1/0 (visually "Junior" again via getTitleForLevel in the webview) in
+     * exchange for a permanent, stacking +5%-per-prestige XP badge. Everything
+     * else — lifetime totals, streak, achievements, inventory, coffee — is
+     * untouched; this only resets the level/xp progression loop.
+     */
+    async prestige() {
+        if (this.developer.level < PRESTIGE_LEVEL_REQUIREMENT) {
+            return {
+                success: false,
+                message: `Reach Level ${PRESTIGE_LEVEL_REQUIREMENT} before you can Prestige (you're Level ${this.developer.level}).`
+            };
+        }
+        const nextPrestige = (this.developer.prestigeCount || 0) + 1;
+        const selection = await vscode.window.showWarningMessage(`Prestige ${nextPrestige}: resets your level to 1 and clears current XP, in exchange for a permanent +${nextPrestige * PRESTIGE_XP_BONUS_PER_PRESTIGE * 100}% XP boost. Your lifetime stats, streak, achievements, and inventory are untouched. Continue?`, 'Yes', 'No');
+        if (selection !== 'Yes') {
+            return { success: false, message: 'Prestige cancelled.' };
+        }
+        this.developer.prestigeCount = nextPrestige;
+        this.developer.level = 1;
+        this.developer.xp = 0;
+        const message = `🌟 Prestige ${nextPrestige}! Back to Level 1 — Junior Developer again, with a permanent +${nextPrestige * PRESTIGE_XP_BONUS_PER_PRESTIGE * 100}% XP boost.`;
+        this.addLog(message, 'achievement');
+        this.saveDeveloper();
+        vscode.window.showInformationMessage(message);
+        return { success: true, message };
     }
 }
 /**
@@ -1689,17 +2824,35 @@ class DeveloperPanel {
                 case 'export-progress':
                     vscode.commands.executeCommand('devgotchi.exportProgress');
                     break;
+                case 'export-timesheet':
+                    vscode.commands.executeCommand('devgotchi.exportTimesheet');
+                    break;
                 case 'import-progress':
                     vscode.commands.executeCommand('devgotchi.importProgress');
                     break;
                 case 'reset-progress':
                     vscode.commands.executeCommand('devgotchi.resetProgress');
                     break;
+                case 'prestige':
+                    vscode.commands.executeCommand('devgotchi.prestige');
+                    break;
+                case 'import-quest-pack':
+                    vscode.commands.executeCommand('devgotchi.importQuestPack');
+                    break;
+                case 'import-quest-pack-url':
+                    vscode.commands.executeCommand('devgotchi.importQuestPackFromUrl');
+                    break;
+                case 'remove-quest-pack':
+                    this.updatePanel(this.devManager.removeQuestPack(message.packId));
+                    break;
                 case 'toggle-vacation-mode':
                     this.updatePanel(this.devManager.setVacationMode(!!message.enabled));
                     break;
                 case 'open-feedback':
                     vscode.commands.executeCommand('devgotchi.sendFeedback');
+                    break;
+                case 'open-sponsors':
+                    vscode.commands.executeCommand('devgotchi.openSponsors');
                     break;
                 case 'get-team-data':
                     this.sendTeamData();
@@ -1771,7 +2924,10 @@ class DeveloperPanel {
             // isAvailable() is cached after its first (real) git shell-out, so
             // calling it on every 30s tick is cheap.
             teamAvailable: this.teamManager?.isAvailable() ?? false,
-            teamEnabled: this.teamManager?.isEnabled() ?? false
+            teamEnabled: this.teamManager?.isEnabled() ?? false,
+            seasonalStatus: this.devManager.getSeasonalStatus(),
+            bossAffix: this.devManager.getBossAffixStatus(),
+            legacyDungeon: this.devManager.getLegacyDungeonStatus()
         });
     }
     /**
@@ -1787,6 +2943,13 @@ class DeveloperPanel {
      */
     openWeeklyRecapShare() {
         this.panel.webview.postMessage({ command: 'open-weekly-recap-modal' });
+    }
+    /**
+     * Tells the webview to open the Share modal on the Year in Code Wrapped
+     * tab (used by the "View Wrapped" action on the yearly recap notification).
+     */
+    openYearlyRecapShare() {
+        this.panel.webview.postMessage({ command: 'open-yearly-recap-modal' });
     }
     /**
      * Tells the webview to open the Settings modal (used by the
@@ -2127,6 +3290,36 @@ class DeveloperPanel {
       box-shadow: 0 0 8px var(--neon-gold);
     }
 
+    /* Merge Conflict Kraken mode — swaps in when the repo has real
+       unresolved merge-conflict files; takes priority over Bug Boss since
+       a live conflict is a blocking state. */
+    #bossCard.kraken-mode {
+      border-color: #0a3a4a;
+      box-shadow: 0 0 10px rgba(64,200,255,0.12);
+    }
+    #bossCard.kraken-mode .boss-title { color: var(--neon-blue); }
+    #bossCard.kraken-mode .boss-name { color: #6fe0ff; }
+    #bossCard.kraken-mode .boss-track { border-color: #0a3a4a; }
+    #bossCard.kraken-mode .boss-hp-fill {
+      background: linear-gradient(90deg, #004a5e, var(--neon-blue));
+      box-shadow: 0 0 8px var(--neon-blue);
+    }
+
+    /* Code Smell Boss mode — swaps in when open files are bloated past
+       LONG_FILE_LINE_THRESHOLD lines; lowest priority of the three "real"
+       bosses since it's a non-blocking chore, not an active error state. */
+    #bossCard.smell-mode {
+      border-color: #0a3a1a;
+      box-shadow: 0 0 10px rgba(0,230,118,0.12);
+    }
+    #bossCard.smell-mode .boss-title { color: var(--neon-green); }
+    #bossCard.smell-mode .boss-name { color: #6fffa8; }
+    #bossCard.smell-mode .boss-track { border-color: #0a3a1a; }
+    #bossCard.smell-mode .boss-hp-fill {
+      background: linear-gradient(90deg, #005e2e, var(--neon-green));
+      box-shadow: 0 0 8px var(--neon-green);
+    }
+
     /* ── FOCUS SPRINT ── */
     .focus-card {
       background: var(--bg-panel);
@@ -2398,7 +3591,7 @@ class DeveloperPanel {
       overflow: hidden;
       line-height: 0;
     }
-    #shareCanvas, #recapCanvas { width: 100%; height: auto; display: block; }
+    #shareCanvas, #recapCanvas, #wrappedCanvas { width: 100%; height: auto; display: block; }
     .flex-share-btn {
       width: 100%;
       padding: 12px;
@@ -2614,6 +3807,26 @@ class DeveloperPanel {
     .ach-desc { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
     .ach-item.locked { opacity: 0.45; filter: grayscale(1); }
 
+    /* Daily Login Calendar */
+    .cal-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .cal-cell {
+      aspect-ratio: 1;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 3px;
+      font-size: 10px; color: var(--text-dim);
+    }
+    .cal-cell .cal-day { font-size: 9px; letter-spacing: 0.5px; }
+    .cal-cell .cal-icon { font-size: 15px; margin: 2px 0; }
+    .cal-cell.claimed { border-color: var(--neon-green); background: rgba(0,255,65,0.08); color: var(--text-main); }
+    .cal-cell.today { border-color: var(--neon-gold); box-shadow: 0 0 8px rgba(255,215,64,0.4); color: var(--text-main); }
+    .cal-cell.milestone { border-color: var(--neon-pink); }
+    .cal-cell.milestone.claimed { background: rgba(224,64,251,0.12); border-color: var(--neon-pink); }
+
     /* Log entries */
     .log-xp   { color: var(--neon-purple); }
     .log-coffee { color: var(--neon-gold); }
@@ -2663,6 +3876,7 @@ class DeveloperPanel {
                 <div class="xp-bar-wrap" style="max-width:120px;"><div id="xpBar" class="xp-fill" style="width:0%"></div></div>
                 <div class="xp-text" id="xpText">0 / 100 XP</div>
               </div>
+              <button id="prestigeBtn" onclick="doPrestige()" title="Reset to Level 1 for a permanent +5% XP badge" style="display:none; margin-top:6px; background:var(--bg-card); border:1px solid var(--neon-gold); color:var(--neon-gold); font-family:inherit; font-size:10.5px; letter-spacing:1px; padding:5px 10px; border-radius:3px; cursor:pointer;">🌟 PRESTIGE</button>
             </div>
           </div>
           <!-- Pixel art scene canvas -->
@@ -2784,6 +3998,12 @@ class DeveloperPanel {
           <button id="btn-achievements" class="action-btn" onclick="showAchievements()" title="Achievements">
             <div class="action-icon">🏅</div><div class="action-label">Awards</div>
           </button>
+          <button id="btn-calendar" class="action-btn" onclick="showDailyCalendar()" title="Daily Login Calendar">
+            <div class="action-icon">📅</div><div class="action-label">Calendar</div>
+          </button>
+          <button id="btn-story" class="action-btn" onclick="showStory()" title="The Legacy Code Dungeon">
+            <div class="action-icon">📖</div><div class="action-label">Story</div>
+          </button>
           <button id="btn-log" class="action-btn" onclick="toggleLog()" title="Activity Log">
             <div class="action-icon">📡</div><div class="action-label">Log</div>
           </button>
@@ -2795,6 +4015,9 @@ class DeveloperPanel {
           </button>
           <button id="btn-team" class="action-btn" onclick="showTeamModal()" title="Team" style="display:none;">
             <div class="action-icon">👥</div><div class="action-label">Team</div>
+          </button>
+          <button id="btn-sponsor" class="action-btn" onclick="openSponsors()" title="Buy the dev a coffee — opens GitHub Sponsors, +25 beans for checking it out (once/day)">
+            <div class="action-icon">💖</div><div class="action-label">Sponsor</div>
           </button>
         </div>
 
@@ -2867,6 +4090,12 @@ class DeveloperPanel {
       <div id="vacationBanner" style="display:none; background: linear-gradient(90deg, #0d4d3a, #14a67a); padding: 10px 16px; margin-bottom: 10px; border-radius: 3px; font-size: 12px; letter-spacing: 1px; text-align:center;">
         🌴 VACATION MODE — stats and streak are frozen. Turn it off in Settings when you're back.
       </div>
+      <div id="seasonalBanner" onclick="showQuests()" style="display:none; cursor:pointer; padding: 10px 16px; margin-bottom: 10px; border-radius: 3px; font-size: 12px; letter-spacing: 1px; text-align:center; font-weight:bold;">
+        <span id="seasonalBannerText"></span>
+      </div>
+      <div id="affixBanner" title="This week's Boss Affix — a mutator that rotates automatically every Monday" style="display:none; background: linear-gradient(90deg, #3a0a4a, #7a1fae); padding: 10px 16px; margin-bottom: 10px; border-radius: 3px; font-size: 12px; letter-spacing: 1px; text-align:center; font-weight:bold; color:#f0e0ff;">
+        <span id="affixBannerText"></span>
+      </div>
 
       <!-- ── ACTIVITY LOG ── -->
       <div id="logPanel" style="display:none; background:var(--bg-panel); border:1px solid var(--border); border-top:2px solid var(--neon-blue); border-radius:4px; padding:14px; margin-bottom:12px;">
@@ -2886,6 +4115,26 @@ class DeveloperPanel {
         </div>
       </div>
 
+      <!-- ── DAILY LOGIN CALENDAR MODAL ── -->
+      <div id="dailyCalendarModal" class="modal">
+        <div class="modal-content" style="max-width:460px">
+          <h3>📅 Daily Login Calendar</h3>
+          <div id="dailyCalendarSubtitle" style="font-size:11px; color:var(--text-dim); margin-bottom:12px;">Log in on consecutive days to climb the calendar. Day 30 pays out big.</div>
+          <div id="dailyCalendarGrid" class="cal-grid"></div>
+          <button class="modal-close-btn" onclick="closeDailyCalendar()">CLOSE</button>
+        </div>
+      </div>
+
+      <!-- ── STORY MODAL (The Legacy Code Dungeon) ── -->
+      <div id="storyModal" class="modal">
+        <div class="modal-content" style="max-width:480px">
+          <h3>📖 The Legacy Code Dungeon</h3>
+          <div id="storyCurrentCard" style="background:var(--bg-card); border:1px solid var(--border); border-radius:4px; padding:14px; margin-bottom:14px;"></div>
+          <div id="storyChapterList" style="max-height:220px; overflow-y:auto;"></div>
+          <button class="modal-close-btn" onclick="closeStory()">CLOSE</button>
+        </div>
+      </div>
+
       <!-- ── SHARE STATS CARD MODAL ── -->
       <div id="shareModal" class="modal">
         <div class="modal-content" style="max-width:640px">
@@ -2893,11 +4142,13 @@ class DeveloperPanel {
           <div class="share-tabs">
             <button id="shareTabStats" class="share-tab active" onclick="switchShareTab('stats')">🕹️ Stats Card</button>
             <button id="shareTabRecap" class="share-tab" onclick="switchShareTab('recap')">📊 Weekly Recap</button>
+            <button id="shareTabWrapped" class="share-tab" onclick="switchShareTab('wrapped')">🎁 Year Wrapped</button>
             <button id="shareTabStandup" class="share-tab" onclick="switchShareTab('standup')">📋 Standup</button>
           </div>
           <div class="share-canvas-wrap" id="shareCanvasWrap">
             <canvas id="shareCanvas" width="1200" height="630"></canvas>
             <canvas id="recapCanvas" width="1200" height="630" style="display:none"></canvas>
+            <canvas id="wrappedCanvas" width="1200" height="630" style="display:none"></canvas>
           </div>
           <div id="standupWrap" style="display:none;">
             <pre id="standupPreview" class="standup-preview"></pre>
@@ -2968,9 +4219,21 @@ class DeveloperPanel {
               <button onclick="importProgress()">📂 IMPORT</button>
             </div>
           </div>
+          <div class="settings-row">
+            <label class="settings-label" style="display:block; margin-bottom:8px; cursor:default;">💼 Timesheet Mode</label>
+            <div class="modal-buttons">
+              <button onclick="exportTimesheet()">📊 EXPORT TIMESHEET (CSV)</button>
+            </div>
+            <div style="font-size:11px; color:var(--text-dim); margin-top:4px;">
+              Billable hours per day, tracked from real (non-idle) coding time. No rate applied — just honest hours.
+            </div>
+          </div>
           <button class="modal-close-btn" style="margin-top:14px; color:var(--neon-pink); border-color:var(--neon-pink);" onclick="confirmResetProgress()">RESET ALL PROGRESS</button>
           <div class="settings-row" style="text-align:center; margin-top:14px; margin-bottom:0;">
             <a href="#" onclick="sendFeedback(); return false;" style="color:var(--neon-blue); font-size:12px; text-decoration:underline; cursor:pointer;">💬 Send Feedback / Report a Bug</a>
+          </div>
+          <div class="settings-row" style="text-align:center; margin-top:8px; margin-bottom:0;">
+            <a href="#" onclick="openSponsors(); return false;" style="color:var(--neon-pink); font-size:12px; text-decoration:underline; cursor:pointer;">💖 Support DevGotchi on GitHub Sponsors</a>
           </div>
         </div>
       </div>
@@ -2998,6 +4261,8 @@ class DeveloperPanel {
         let currentSettings = null;
         let teamAvailable = false;
         let teamEnabled = false;
+        let currentSeasonalStatus = null;
+        let currentLegacyDungeon = null;
         const SKILLS = ${JSON.stringify(SKILLS)};
         const SHOP_ITEMS = ${JSON.stringify(SHOP_ITEMS)};
         const CLASSES = ${JSON.stringify(CLASSES)};
@@ -3040,7 +4305,12 @@ class DeveloperPanel {
         }
         function exportProgress() { vscode.postMessage({ command: 'export-progress' }); }
         function importProgress() { vscode.postMessage({ command: 'import-progress' }); }
+        function exportTimesheet() { vscode.postMessage({ command: 'export-timesheet' }); }
         function confirmResetProgress() { vscode.postMessage({ command: 'reset-progress' }); }
+        function doPrestige() { vscode.postMessage({ command: 'prestige' }); }
+        function importQuestPack() { vscode.postMessage({ command: 'import-quest-pack' }); }
+        function importQuestPackFromUrl() { vscode.postMessage({ command: 'import-quest-pack-url' }); }
+        function removeQuestPack(packId) { vscode.postMessage({ command: 'remove-quest-pack', packId: packId }); }
 
         // Vacation Mode takes effect immediately on toggle, unlike the other
         // settings above which batch into the SAVE button — it's live game
@@ -3051,6 +4321,7 @@ class DeveloperPanel {
         }
 
         function sendFeedback() { vscode.postMessage({ command: 'open-feedback' }); }
+        function openSponsors() { vscode.postMessage({ command: 'open-sponsors' }); }
 
         // ── TEAM MODE ──
         // Like Vacation Mode, this takes effect immediately rather than
@@ -3208,6 +4479,10 @@ class DeveloperPanel {
 
           SHOP_ITEMS.forEach(item => {
             const owned = currentDev.inventory && currentDev.inventory.includes(item.id);
+            // Event-only items (e.g. the Hacktoberfest skin) aren't for sale —
+            // only show them here once earned, so the Shop isn't cluttered
+            // with unbuyable items the rest of the year.
+            if (item.eventOnly && !owned) return;
             const canAfford = currentDev.coffee >= item.cost;
             const costHtml = canAfford ? item.cost : '<span class="cant-afford">' + item.cost + '</span>';
             let btnHtml = '';
@@ -3271,6 +4546,13 @@ class DeveloperPanel {
           const list = document.getElementById('questsList');
           list.innerHTML = '';
 
+          if (currentSeasonalStatus) {
+            const s = currentSeasonalStatus;
+            const pct = Math.floor(Math.min(100, (s.progress / s.target) * 100));
+            const status = s.completed ? '✅' : pct + '%';
+            list.innerHTML += '<div class="quest-item" style="border-color:' + s.accentColor + ';"><div class="quest-header"><span>' + s.emoji + ' ' + s.questLabel + ' — ' + s.skinEmoji + ' ' + s.skinName + '</span><span>' + status + '</span></div><div class="quest-progress-bg"><div class="quest-progress-fill" style="width: ' + pct + '%; background: linear-gradient(90deg, ' + s.bannerGradientStart + ', ' + s.accentColor + '); box-shadow: 0 0 6px ' + s.accentColor + ';"></div></div></div>';
+          }
+
           const streak = currentDev.questStreak || 0;
           list.innerHTML += '<div class="streak-badge">🔥 Quest Streak: ' + streak + ' days</div>';
 
@@ -3283,6 +4565,39 @@ class DeveloperPanel {
           
           if (!currentDev.quests || currentDev.quests.length === 0) {
             list.innerHTML += '<p style="text-align:center; color:var(--text-dim); font-size:12px; padding:12px 0;">No active quests. Wait for daily reset!</p>';
+          }
+
+          // ── Community Quest Packs ──
+          list.innerHTML += '<div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">' +
+            '<span style="font-size:11px; color:var(--text-dim); letter-spacing:1px;">🎁 QUEST PACKS</span>' +
+            '<span>' +
+              '<button style="font-size:10px; padding:4px 8px;" onclick="importQuestPack()">📂 FILE</button> ' +
+              '<button style="font-size:10px; padding:4px 8px;" onclick="importQuestPackFromUrl()">🔗 URL</button>' +
+            '</span>' +
+          '</div>';
+
+          const packQuests = currentDev.packQuests || [];
+          if (packQuests.length === 0) {
+            list.innerHTML += '<p style="text-align:center; color:var(--text-dim); font-size:12px; padding:4px 0 8px;">No Quest Packs imported yet — try "100 Days of Code".</p>';
+          } else {
+            const byPack = {};
+            packQuests.forEach(q => {
+              const key = q.packId || 'unknown';
+              if (!byPack[key]) byPack[key] = { name: q.packName || key, quests: [] };
+              byPack[key].quests.push(q);
+            });
+            Object.keys(byPack).forEach(packId => {
+              const group = byPack[packId];
+              list.innerHTML += '<div style="font-size:10px; color:var(--neon-pink); margin:8px 0 4px; display:flex; justify-content:space-between; align-items:center;">' +
+                '<span>' + group.name + '</span>' +
+                '<a href="#" onclick="removeQuestPack(\\'' + packId + '\\'); return false;" style="color:var(--text-dim); font-size:10px; cursor:pointer;">remove</a>' +
+              '</div>';
+              group.quests.forEach(q => {
+                const pct = Math.floor(Math.min(100, (q.progress / q.target) * 100));
+                const status = q.completed ? '✅' : pct + '%';
+                list.innerHTML += '<div class="quest-item"><div class="quest-header"><span>' + q.description + '</span><span>' + status + '</span></div><div class="quest-progress-bg"><div class="quest-progress-fill" style="width: ' + pct + '%"></div></div></div>';
+              });
+            });
           }
         }
 
@@ -3342,6 +4657,34 @@ class DeveloperPanel {
             teamAvailable = !!m.teamAvailable;
             teamEnabled = !!m.teamEnabled;
             document.getElementById('btn-team').style.display = (teamAvailable || teamEnabled) ? 'flex' : 'none';
+            // Boss theme visual tell: flip the music icon while the
+            // soundtrack is in intensified "boss mode" (see getBossIntensity
+            // / scheduleBar), so the escalation is visible, not just audible.
+            if (musicPlaying) {
+              document.getElementById('musicIcon').textContent = getBossIntensity() > 0 ? '👾' : '🔊';
+            }
+            currentSeasonalStatus = m.seasonalStatus || null;
+            currentLegacyDungeon = m.legacyDungeon || null;
+            const seasonalBanner = document.getElementById('seasonalBanner');
+            if (currentSeasonalStatus) {
+              const s = currentSeasonalStatus;
+              seasonalBanner.style.display = 'block';
+              seasonalBanner.style.background = 'linear-gradient(90deg, ' + s.bannerGradientStart + ', ' + s.bannerGradientEnd + ')';
+              seasonalBanner.style.color = s.bannerTextColor;
+              document.getElementById('seasonalBannerText').textContent = s.completed
+                ? (s.emoji + ' ' + s.name + ' complete — ' + s.skinEmoji + ' ' + s.skinName + ' unlocked!')
+                : (s.emoji + ' ' + s.name + ' — ' + s.questLabel + ' (' + s.progress + '/' + s.target + ') for the ' + s.skinEmoji + ' ' + s.skinName + ' skin');
+            } else {
+              seasonalBanner.style.display = 'none';
+            }
+            const affix = m.bossAffix || null;
+            const affixBanner = document.getElementById('affixBanner');
+            if (affix) {
+              affixBanner.style.display = 'block';
+              document.getElementById('affixBannerText').textContent = "🎲 This Week's Affix: " + affix.emoji + ' ' + affix.name + ' — ' + affix.description;
+            } else {
+              affixBanner.style.display = 'none';
+            }
             updateFocusUI();
 
             // Stats
@@ -3366,7 +4709,9 @@ class DeveloperPanel {
             if (sc) drawScene(sc, dev.mood, dev.characterClass);
             const calC = document.getElementById('streakCalCanvas');
             if (calC) drawStreakCalendar(calC, dev.activityDates);
-            document.getElementById('levelBadge').textContent = 'LEVEL ' + dev.level;
+            const prestigeCount = dev.prestigeCount || 0;
+            document.getElementById('levelBadge').textContent = (prestigeCount > 0 ? '🌟×' + prestigeCount + ' ' : '') + 'LEVEL ' + dev.level;
+            document.getElementById('prestigeBtn').style.display = dev.level >= 50 ? 'inline-block' : 'none';
 
             // XP
             const xpNeeded = dev.level * 100;
@@ -3387,11 +4732,29 @@ class DeveloperPanel {
               document.getElementById('activeQuestPct').textContent = '';
             }
 
-            // Boss card: shows a real Bug Boss when there are active lint/build
-            // errors, otherwise falls back to the burnout-derived boss.
+            // Boss card: Merge Conflict Kraken takes priority (a live conflict
+            // blocks work), then Bug Boss (active lint/build errors), then
+            // Code Smell Boss (bloated open files — a non-blocking chore, so
+            // it only shows once nothing more urgent is going on), otherwise
+            // falls back to the burnout-derived boss.
             const bossCard = document.getElementById('bossCard');
             const activeErrors = dev.activeErrorCount || 0;
-            if (activeErrors > 0) {
+            const conflicts = dev.mergeConflictCount || 0;
+            const longFiles = dev.longFileCount || 0;
+            if (conflicts > 0) {
+              bossCard.classList.remove('bug-mode', 'smell-mode');
+              bossCard.classList.add('kraken-mode');
+              document.getElementById('bossTitleDisplay').textContent = '🐙 Merge Conflict Kraken';
+              let bossName = 'Conflict Tentacle';
+              if (conflicts >= 11) bossName = 'Git Cthulhu';
+              else if (conflicts >= 6) bossName = 'Rebase Leviathan';
+              else if (conflicts >= 3) bossName = 'Merge Kraken';
+              document.getElementById('bossNameDisplay').textContent = bossName;
+              const krakenPct = Math.min(100, conflicts * 25);
+              document.getElementById('bossHealthBar').style.width = krakenPct + '%';
+              document.getElementById('bossHealthText').textContent = conflicts + ' conflict' + (conflicts === 1 ? '' : 's') + ' remaining';
+            } else if (activeErrors > 0) {
+              bossCard.classList.remove('kraken-mode', 'smell-mode');
               bossCard.classList.add('bug-mode');
               document.getElementById('bossTitleDisplay').textContent = '🐛 Bug Boss';
               let bossName = 'Syntax Wraith';
@@ -3402,8 +4765,20 @@ class DeveloperPanel {
               const bugPct = Math.min(100, activeErrors * 20);
               document.getElementById('bossHealthBar').style.width = bugPct + '%';
               document.getElementById('bossHealthText').textContent = activeErrors + ' error' + (activeErrors === 1 ? '' : 's') + ' remaining';
+            } else if (longFiles > 0) {
+              bossCard.classList.remove('kraken-mode', 'bug-mode');
+              bossCard.classList.add('smell-mode');
+              document.getElementById('bossTitleDisplay').textContent = '🧟 Code Smell Boss';
+              let bossName = 'Spaghetti Sprite';
+              if (longFiles >= 11) bossName = 'Technical Debt Titan';
+              else if (longFiles >= 6) bossName = 'Legacy Behemoth';
+              else if (longFiles >= 3) bossName = 'Code Smell Ooze';
+              document.getElementById('bossNameDisplay').textContent = bossName;
+              const smellPct = Math.min(100, longFiles * 20);
+              document.getElementById('bossHealthBar').style.width = smellPct + '%';
+              document.getElementById('bossHealthText').textContent = longFiles + ' bloated file' + (longFiles === 1 ? '' : 's') + ' open (300+ lines)';
             } else {
-              bossCard.classList.remove('bug-mode');
+              bossCard.classList.remove('bug-mode', 'kraken-mode', 'smell-mode');
               document.getElementById('bossTitleDisplay').textContent = '☠ Burnout Boss';
               document.getElementById('bossNameDisplay').textContent = 'Overwhelmulus';
               const bossMaxHp = 500;
@@ -3416,6 +4791,8 @@ class DeveloperPanel {
             if(document.getElementById('shopModal').classList.contains('active')) renderShop();
             if(document.getElementById('questsModal').classList.contains('active')) renderQuests();
             if(document.getElementById('achievementsModal').classList.contains('active')) renderAchievements();
+            if(document.getElementById('dailyCalendarModal').classList.contains('active')) renderDailyCalendar();
+            if(document.getElementById('storyModal').classList.contains('active')) renderStory();
             if(document.getElementById('logPanel').style.display !== 'none') renderLog();
             if(document.getElementById('settingsModal').classList.contains('active')) renderSettings();
 
@@ -3451,6 +4828,9 @@ class DeveloperPanel {
           }
           if (m.command === 'open-weekly-recap-modal') {
             showShareModal('recap');
+          }
+          if (m.command === 'open-yearly-recap-modal') {
+            showShareModal('wrapped');
           }
           if (m.command === 'open-settings-modal') {
             if (m.settings) currentSettings = m.settings;
@@ -3946,15 +5326,107 @@ class DeveloperPanel {
             earnedItems.length + ' / ' + total + ' UNLOCKED</div>';
           [...earnedItems, ...lockedItems].forEach(ach => {
             const isEarned = earned.has(ach.id);
+            // Secret achievements stay a "???" mystery until unlocked, so
+            // players discover the trigger instead of reading it off the list.
+            const isHidden = ach.secret && !isEarned;
+            const icon = isHidden ? '❓' : ach.icon;
+            const name = isHidden ? '???' : ach.name;
+            const desc = isHidden ? 'Secret achievement — keep coding to find out.' : ach.description;
             list.innerHTML += '<div class="ach-item ' + (isEarned ? 'earned' : 'locked') + '">' +
-              '<div class="ach-icon">' + ach.icon + '</div>' +
+              '<div class="ach-icon">' + icon + '</div>' +
               '<div class="ach-info">' +
-                '<div class="ach-name">' + ach.name + '</div>' +
-                '<div class="ach-desc">' + ach.description + '</div>' +
+                '<div class="ach-name">' + name + '</div>' +
+                '<div class="ach-desc">' + desc + '</div>' +
               '</div>' +
               (isEarned ? '<span style="color:var(--neon-gold);font-size:14px;">✓</span>' : '<span style="color:var(--text-dim);font-size:11px;">🔒</span>') +
             '</div>';
           });
+        }
+
+        // ── DAILY LOGIN CALENDAR ────────────────────────────────────────────
+        // Overlays a repeating 30-day cycle on top of the existing login
+        // streak (dev.streak) — day 30 of each cycle pays a big one-time
+        // bonus (see checkDailyBonus in the extension host). Purely a view;
+        // no separate state to track here.
+        function showDailyCalendar() {
+          document.getElementById('dailyCalendarModal').classList.add('active');
+          renderDailyCalendar();
+        }
+        function closeDailyCalendar() {
+          document.getElementById('dailyCalendarModal').classList.remove('active');
+        }
+        function renderDailyCalendar() {
+          if (!currentDev) return;
+          const streak = currentDev.streak || 0;
+          const dayInCycle = streak > 0 ? ((streak - 1) % 30) + 1 : 0;
+          const grid = document.getElementById('dailyCalendarGrid');
+          let html = '';
+          for (let day = 1; day <= 30; day++) {
+            const isMilestone = day === 30;
+            const isClaimed = day <= dayInCycle;
+            const isToday = day === dayInCycle;
+            const classes = ['cal-cell'];
+            if (isClaimed) classes.push('claimed');
+            if (isToday) classes.push('today');
+            if (isMilestone) classes.push('milestone');
+            const icon = isMilestone ? '🎁' : (isClaimed ? '☕' : '·');
+            html += '<div class="' + classes.join(' ') + '" title="' + (isMilestone ? 'Day 30: big bonus' : ('Day ' + day)) + '">' +
+              '<div class="cal-day">' + day + '</div>' +
+              '<div class="cal-icon">' + icon + '</div>' +
+            '</div>';
+          }
+          grid.innerHTML = html;
+          document.getElementById('dailyCalendarSubtitle').textContent =
+            streak > 0
+              ? ('🔥 ' + streak + '-day streak — Day ' + dayInCycle + ' of this 30-day cycle. Log in daily; Day 30 pays out big.')
+              : 'Log in on consecutive days to climb the calendar. Day 30 pays out big.';
+        }
+
+        // ── STORY (The Legacy Code Dungeon) ─────────────────────────────────
+        function showStory() {
+          document.getElementById('storyModal').classList.add('active');
+          renderStory();
+        }
+        function closeStory() {
+          document.getElementById('storyModal').classList.remove('active');
+        }
+        const STORY_OBJECTIVE_LABEL = { save: 'files saved', commit: 'commits', fix: 'bugs fixed', time: 'minutes coded' };
+        function renderStory() {
+          const d = currentLegacyDungeon;
+          const card = document.getElementById('storyCurrentCard');
+          const list = document.getElementById('storyChapterList');
+          if (!d) { card.innerHTML = ''; list.innerHTML = ''; return; }
+
+          if (d.completed) {
+            card.innerHTML = '<div style="text-align:center;">' +
+              '<div style="font-size:28px; margin-bottom:6px;">💀</div>' +
+              '<div style="font-weight:bold; color:var(--neon-gold); margin-bottom:6px;">THE LEGACY CODE DUNGEON — COMPLETE</div>' +
+              '<div style="font-size:12px; color:var(--text-dim);">You cleared all ' + d.totalChapters + ' chapters and earned the 💀 Legacy Slayer skin — equip it from the Shop.</div>' +
+            '</div>';
+          } else if (d.gated) {
+            card.innerHTML = '<div style="text-align:center;">' +
+              '<div style="font-size:11px; color:var(--text-dim); letter-spacing:1px; margin-bottom:4px;">CHAPTER ' + d.currentChapter + ' OF ' + d.totalChapters + ' — COMPLETE</div>' +
+              '<div style="font-weight:bold; margin-bottom:8px;">' + d.title + '</div>' +
+              '<div style="font-size:12px; color:var(--text-dim);">The next chapter unlocks tomorrow — come back after a new day begins.</div>' +
+            '</div>';
+          } else {
+            const pct = Math.floor(Math.min(100, (d.progress / d.target) * 100));
+            card.innerHTML =
+              '<div style="font-size:11px; color:var(--text-dim); letter-spacing:1px; margin-bottom:4px;">CHAPTER ' + d.currentChapter + ' OF ' + d.totalChapters + '</div>' +
+              '<div style="font-weight:bold; margin-bottom:8px;">' + d.title + '</div>' +
+              '<div style="font-size:12px; color:var(--text-main); font-style:italic; margin-bottom:12px; line-height:1.5;">' + d.flavorText + '</div>' +
+              '<div class="quest-track"><div class="quest-fill" style="width:' + pct + '%"></div></div>' +
+              '<div style="font-size:11px; color:var(--text-dim); margin-top:4px; text-align:right;">' + d.progress + ' / ' + d.target + ' ' + (STORY_OBJECTIVE_LABEL[d.objectiveType] || '') + '</div>';
+          }
+
+          list.innerHTML = (d.chapters || []).map(function(c, i) {
+            const icon = c.state === 'completed' ? '✅' : (c.state === 'current' ? '▶️' : '🔒');
+            const title = c.state === 'locked' ? '???' : c.title;
+            const dim = c.state === 'locked' ? 'color:var(--text-dim); opacity:0.6;' : '';
+            return '<div style="display:flex; gap:8px; align-items:center; padding:6px 0; font-size:12px; ' + dim + '">' +
+              '<span>' + icon + '</span><span>Chapter ' + (i + 1) + ': ' + title + '</span>' +
+            '</div>';
+          }).join('');
         }
 
         // ── SHARE STATS CARD ────────────────────────────────────────────────
@@ -3979,11 +5451,13 @@ class DeveloperPanel {
           currentShareTab = tab;
           document.getElementById('shareTabStats').classList.toggle('active', tab === 'stats');
           document.getElementById('shareTabRecap').classList.toggle('active', tab === 'recap');
+          document.getElementById('shareTabWrapped').classList.toggle('active', tab === 'wrapped');
           document.getElementById('shareTabStandup').classList.toggle('active', tab === 'standup');
 
           document.getElementById('shareCanvasWrap').style.display = tab === 'standup' ? 'none' : 'block';
           document.getElementById('shareCanvas').style.display = tab === 'stats' ? 'block' : 'none';
           document.getElementById('recapCanvas').style.display = tab === 'recap' ? 'block' : 'none';
+          document.getElementById('wrappedCanvas').style.display = tab === 'wrapped' ? 'block' : 'none';
           document.getElementById('standupWrap').style.display = tab === 'standup' ? 'block' : 'none';
 
           document.getElementById('flexButtonRow').style.display = tab === 'standup' ? 'none' : 'flex';
@@ -3991,6 +5465,7 @@ class DeveloperPanel {
           document.getElementById('statsExtraButtons').style.display = tab === 'standup' ? 'none' : 'flex';
 
           if (tab === 'recap') renderRecapCard();
+          else if (tab === 'wrapped') renderWrappedCard();
           else if (tab === 'standup') renderStandupPreview();
           else renderShareCard();
         }
@@ -4244,6 +5719,86 @@ class DeveloperPanel {
           drawCardFooter(ctx, W, H);
         }
 
+        // ── YEAR IN CODE WRAPPED ─────────────────────────────────────────
+        function formatHour12(h) {
+          const period = h < 12 ? 'AM' : 'PM';
+          let hour12 = h % 12;
+          if (hour12 === 0) hour12 = 12;
+          return hour12 + ' ' + period;
+        }
+
+        function getHourFlavor(h) {
+          if (h < 5) return 'Night Owl 🦉';
+          if (h < 9) return 'Early Bird 🐦';
+          if (h < 12) return 'Morning Person ☀️';
+          if (h < 17) return 'Afternoon Grinder 💻';
+          if (h < 21) return 'Evening Coder 🌆';
+          return 'Late Night Hacker 🌙';
+        }
+
+        // Lifetime-to-date totals, not a delta — see YearlyRecapResult in the
+        // extension host. Reuses the same chrome/tile/footer/contribution-
+        // graph helpers as the Weekly Recap card above, just with a year's
+        // worth of stats instead of a week's.
+        function renderWrappedCard() {
+          if (!currentDev) return;
+          const dev = currentDev;
+          const canvas = document.getElementById('wrappedCanvas');
+          const ctx = canvas.getContext('2d');
+          const W = canvas.width, H = canvas.height;
+
+          drawCardChrome(ctx, W, H, 'YEAR IN CODE WRAPPED');
+
+          // Mood badge (top right)
+          ctx.textAlign = 'right';
+          ctx.font = '46px sans-serif';
+          ctx.fillText(dev.mood === 'sleeping' ? '💤' : (dev.role || '👨‍💻'), W-56, 82);
+
+          const r = dev.lastYearlyRecap;
+
+          ctx.textAlign = 'left';
+          ctx.fillStyle = '#7070a0';
+          ctx.font = '16px "Share Tech Mono", monospace';
+          ctx.fillText('YEAR IN CODE — WRAPPED', 58, 158);
+          ctx.fillStyle = '#e8e8ff';
+          ctx.font = 'bold 44px "Share Tech Mono", monospace';
+          ctx.fillText(dev.name || 'Dev', 56, 206);
+
+          ctx.fillStyle = '#ffd740';
+          ctx.font = 'bold 22px "Share Tech Mono", monospace';
+          ctx.textAlign = 'right';
+          ctx.fillText('LEVEL ' + (r ? r.level : dev.level), W-56, 158);
+
+          if (!r) {
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#7070a0';
+            ctx.font = '18px "Share Tech Mono", monospace';
+            ctx.fillText('Your Year in Code Wrapped unlocks after a year of tracked activity.', W/2, 320);
+            drawCardFooter(ctx, W, H);
+            return;
+          }
+
+          const tiles = [
+            ['⚡', String(r.totalXpEarned), 'TOTAL XP'],
+            ['👾', String(r.totalBossesDefeated), 'BOSSES SLAIN'],
+            ['🔥', r.longestStreak + 'd', 'LONGEST STREAK'],
+            ['🕐', formatHour12(r.mostProductiveHour), 'PEAK HOUR']
+          ];
+          drawTileRow(ctx, W, tiles, 230, 130);
+
+          ctx.textAlign = 'left';
+          ctx.fillStyle = '#7070a0';
+          ctx.font = '13px "Share Tech Mono", monospace';
+          ctx.fillText(getHourFlavor(r.mostProductiveHour) + ' · 🏅 ' + r.achievementsUnlocked + ' achievements unlocked', 56, 400);
+
+          ctx.fillStyle = '#7070a0';
+          ctx.font = '11px "Share Tech Mono", monospace';
+          ctx.fillText('PAST 12 MONTHS', 56, 428);
+          drawContributionGraph(ctx, 56, 440, W - 112, dev.activityDates);
+
+          drawCardFooter(ctx, W, H);
+        }
+
         // ── STANDUP GENERATOR ─────────────────────────────────────────────
         // Turns today's Activity Log into a "what I did today" post for
         // Slack — one click, no re-typing the log by hand. The dev's avatar
@@ -4351,11 +5906,16 @@ class DeveloperPanel {
         // Renders whichever card is on-screen and returns { dataUrl, suggestedName }.
         function renderActiveShareCanvas() {
           const isRecap = currentShareTab === 'recap';
-          if (isRecap) renderRecapCard(); else renderShareCard();
-          const canvas = document.getElementById(isRecap ? 'recapCanvas' : 'shareCanvas');
+          const isWrapped = currentShareTab === 'wrapped';
+          if (isRecap) renderRecapCard();
+          else if (isWrapped) renderWrappedCard();
+          else renderShareCard();
+          const canvasId = isRecap ? 'recapCanvas' : (isWrapped ? 'wrappedCanvas' : 'shareCanvas');
+          const canvas = document.getElementById(canvasId);
           const dataUrl = canvas.toDataURL('image/png');
           const safeName = (currentDev.name || 'dev').toLowerCase().replace(/[^a-z0-9]+/g, '-');
-          const suggestedName = 'devgotchi-' + (isRecap ? 'recap-' : '') + safeName + '.png';
+          const prefix = isRecap ? 'recap-' : (isWrapped ? 'wrapped-' : '');
+          const suggestedName = 'devgotchi-' + prefix + safeName + '.png';
           return { dataUrl, suggestedName };
         }
 
@@ -4394,8 +5954,24 @@ class DeveloperPanel {
           ].join('\\n');
         }
 
+        function buildWrappedCaption() {
+          const dev = currentDev;
+          const r = dev.lastYearlyRecap;
+          if (!r) return buildStatsCaption();
+          return [
+            '🎁 My Year in Code Wrapped, courtesy of DevGotchi:',
+            '⚡ ' + r.totalXpEarned + ' total XP · Level ' + r.level,
+            '👾 ' + r.totalBossesDefeated + ' bosses slain · 🔥 ' + r.longestStreak + '-day longest streak',
+            getHourFlavor(r.mostProductiveHour) + ' — peak coding hour: ' + formatHour12(r.mostProductiveHour),
+            '',
+            '#DevGotchi #YearInCode #BuildInPublic #100DaysOfCode #DeveloperLife'
+          ].join('\\n');
+        }
+
         function buildFlexCaption() {
-          return currentShareTab === 'recap' ? buildRecapCaption() : buildStatsCaption();
+          if (currentShareTab === 'recap') return buildRecapCaption();
+          if (currentShareTab === 'wrapped') return buildWrappedCaption();
+          return buildStatsCaption();
         }
 
         // One-click "flex": copies a ready-to-post caption to the clipboard
@@ -4540,35 +6116,55 @@ class DeveloperPanel {
         let   bassStep  = 0;
         let   barCount  = 0;
 
+        // Boss intensity: 0 (no active errors) to 1 (Bug Boss at full HP) —
+        // mirrors the Bug Boss card's own pacing (Math.min(100, errors*20)
+        // caps at 5 errors) so "boss bar full" and "music maxed out" line up.
+        // currentDev is refreshed on every 'update' message from the
+        // extension host (~every 30s, or right after a fix/new error), so
+        // this drifts in step with the real Bug Boss HP without any extra
+        // wiring — the sequencer just reads it fresh each bar.
+        function getBossIntensity() {
+          const errors = (currentDev && currentDev.activeErrorCount) || 0;
+          return Math.min(1, errors / 5);
+        }
+
         function scheduleBar(barStart) {
           if (!musicPlaying) return;
           const stepsPerBar = 16;
+          const intensity = getBossIntensity();
 
           for (let s = 0; s < stepsPerBar; s++) {
             const t = barStart + s * STEP;
 
-            // ── Kick: 1, 3, 5, 7 (quarter notes on beat 1 & 3)
+            // ── Kick: 1, 3, 5, 7 always; a growing Bug Boss adds urgent
+            // double-time kicks on the off-beats too, past the halfway point.
             if (s === 0 || s === 4 || s === 8 || s === 12) playKick(t);
-            // ── Hi-hat: every even eighth
-            if (s % 2 === 0) playHat(t, 0.18);
-            if (s % 2 === 1) playHat(t, 0.08);
+            if (intensity > 0.5 && (s === 2 || s === 6 || s === 10 || s === 14)) playKick(t);
+            // ── Hi-hat: every even eighth, louder as the boss grows
+            if (s % 2 === 0) playHat(t, 0.18 + intensity * 0.12);
+            if (s % 2 === 1) playHat(t, 0.08 + intensity * 0.1);
 
-            // ── Bass: every 2 steps
+            // ── Bass: every 2 steps, brighter + louder under a growing boss
             if (s % 2 === 0) {
               const bIdx = bassSeq[(bassStep++) % bassSeq.length];
-              playNote(BASS[bIdx], t, STEP * 2.2, 'sawtooth', 0.22, 320, 0);
+              playNote(BASS[bIdx], t, STEP * 2.2, 'sawtooth', 0.22 + intensity * 0.1, 320 + intensity * 500, 0);
             }
 
-            // ── Arp: every step
+            // ── Arp: every step, brighter with the boss; past the halfway
+            // point it doubles into urgent 16th-note fills
             const aIdx = arpSeq[(arpStep++) % arpSeq.length];
-            playNote(SCALE[aIdx], t, STEP * 0.6, 'square', 0.07, 2200, (s % 4 < 2) ? -0.3 : 0.3);
+            playNote(SCALE[aIdx], t, STEP * 0.6, 'square', 0.07 + intensity * 0.05, 2200 + intensity * 1500, (s % 4 < 2) ? -0.3 : 0.3);
+            if (intensity > 0.6) {
+              const aIdx2 = arpSeq[(arpStep++) % arpSeq.length];
+              playNote(SCALE[aIdx2] * 2, t + STEP * 0.5, STEP * 0.3, 'square', 0.05 * intensity, 3200, (s % 4 < 2) ? 0.3 : -0.3);
+            }
           }
 
-          // ── Pad chord: whole bar, swells every 2 bars
+          // ── Pad chord: whole bar, swells every 2 bars — brighter/tenser as the boss grows
           if (barCount % 2 === 0) {
             padNotes.forEach((freq, i) => {
               const panVal = [-0.5, -0.2, 0.2, 0.5][i];
-              playNote(freq, barStart, STEP * stepsPerBar * 2, 'sawtooth', 0.055, 900, panVal);
+              playNote(freq, barStart, STEP * stepsPerBar * 2, 'sawtooth', 0.055 + intensity * 0.03, 900 + intensity * 900, panVal);
             });
           }
 
@@ -4576,8 +6172,15 @@ class DeveloperPanel {
           if (barCount % 4 === 0) {
             const lead = [SCALE[6], SCALE[8], SCALE[9], SCALE[7]];
             lead.forEach((f, i) => {
-              playNote(f * 2, barStart + i * STEP * 4, STEP * 3, 'sawtooth', 0.09, 3000, 0.1);
+              playNote(f * 2, barStart + i * STEP * 4, STEP * 3, 'sawtooth', 0.09 + intensity * 0.05, 3000, 0.1);
             });
+          }
+
+          // ── Boss alarm: a low pulsing siren once the Bug Boss is past 80%
+          // HP — the "whoa, it noticed" moment.
+          if (intensity > 0.8) {
+            playNote(BASS[0] / 2, barStart, STEP * 4, 'sawtooth', 0.05 + intensity * 0.06, 200, 0);
+            playNote(BASS[0] / 2, barStart + STEP * 8, STEP * 4, 'sawtooth', 0.05 + intensity * 0.06, 200, 0);
           }
 
           barCount++;

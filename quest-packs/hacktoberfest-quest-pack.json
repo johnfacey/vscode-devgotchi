@@ -1,0 +1,11 @@
+{
+  "packId": "hacktoberfest_quests",
+  "packName": "Hacktoberfest Quest Pack",
+  "packDescription": "Extra coffee-bean quests for October — separate from (and stackable with) the built-in Hacktoberfest seasonal event, which already tracks merged PRs for its own exclusive skin.",
+  "quests": [
+    { "id": "commit_flurry", "type": "commit", "description": "Ship 4 commits this week", "target": 4, "reward": 30 },
+    { "id": "bug_squash", "type": "fix", "description": "Fix 10 bugs — tidy up before the PRs go out", "target": 10, "reward": 45 },
+    { "id": "save_marathon", "type": "save", "description": "Save 40 files", "target": 40, "reward": 35 },
+    { "id": "deep_focus", "type": "time", "description": "Log 150 minutes of coding time", "target": 150, "reward": 55 }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "packId": "100_days_of_code",
+  "packName": "100 Days of Code",
+  "packDescription": "A themed set of quests for anyone doing the #100DaysOfCode challenge — steady, consistent progress over quantity.",
+  "quests": [
+    { "id": "commit_streak_1", "type": "commit", "description": "Ship your Day 1 commit", "target": 1, "reward": 15 },
+    { "id": "save_habit", "type": "save", "description": "Save 20 files — build the muscle memory", "target": 20, "reward": 20 },
+    { "id": "fix_something", "type": "fix", "description": "Fix 5 bugs along the way", "target": 5, "reward": 25 },
+    { "id": "focus_time", "type": "time", "description": "Log 100 minutes of focused coding time", "target": 100, "reward": 40 },
+    { "id": "commit_ten", "type": "commit", "description": "Ship 10 commits total", "target": 10, "reward": 60 },
+    { "id": "commit_hundred_days_spirit", "type": "commit", "description": "Ship 30 commits — that's a third of the way to 100 days of shipping", "target": 30, "reward": 120 }
+  ]
+}
