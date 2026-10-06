@@ -22,11 +22,13 @@ Save files and push commits to earn XP and Coffee Beans. Let your stats decay an
 ### 🧙 Character Classes
 Pick a class the first time you open the panel — it's free, and it sets a permanent passive bonus:
 
-| Class | Passive |
-| :--- | :--- |
-| 🔮 Backend Mage | Git commits channel extra power: +25% XP from commits |
-| 🗡️ Frontend Rogue | Fast and precise: +25% XP from file saves |
-| 🛡️ DevOps Paladin | Built for uptime: energy & motivation decay 15% slower |
+| Class | Passive | Language Affinity (+50% save XP) |
+| :--- | :--- | :--- |
+| 🔮 Backend Mage | Git commits channel extra power: +25% XP from commits | Python, Go, Rust, Java, Kotlin, C/C++, C#, Ruby, PHP, Elixir, SQL, Swift… |
+| 🗡️ Frontend Rogue | Fast and precise: +25% XP from file saves | TypeScript, JavaScript (+ React), HTML, CSS/SCSS/Less, Vue, Svelte, Astro… |
+| 🛡️ DevOps Paladin | Built for uptime: energy & motivation decay 15% slower | Shell, PowerShell, Dockerfile, YAML, Terraform/HCL, Nix, Makefile, TOML… |
+
+**Language Affinity** works from the language VS Code detects for each file you save. Saving in your class's home turf earns +50% save XP, which stacks with the Rogue's save bonus. You'll see a quiet status-bar flash (`🛡️ Infra affinity ✦ +5 XP (shellscript)`) and a ✦ next to the language in the Activity Log. There's no penalty for other languages. A few file types VS Code only knows as plain text without an extra extension installed (`.tf`, `.nix`, `Dockerfile`, `Makefile`…) are still recognized by filename.
 
 Your class also retints your avatar in the panel scene (hoodie + glow color), so your build is visible at a glance. Changed your mind? Respec anytime from the Shop for 200 ☕.
 
@@ -50,7 +52,7 @@ Going to lunch shouldn't tank your stats. If there's no real editor activity (ty
 The panel's boss card isn't just decorative — it becomes a **real boss** tied to your actual repo/editor state, not a simulated fight. Three bosses share the card, in priority order (highest shown when more than one is active):
 
 1. **🐙 Merge Conflict Kraken** — HP is the real count of files with unresolved git merge conflicts (Conflict Tentacle → Merge Kraken → Rebase Leviathan → Git Cthulhu). A live conflict blocks work, so it always takes priority.
-2. **🐛 Bug Boss** — HP is tied 1:1 to your actual active lint/build error count (Syntax Wraith → NullPointerDemon → StackOverflow Behemoth → Overwhelmulus). Fixing an error does real damage; the soundtrack itself intensifies as this one grows — see **🎵 Cyberpunk Music** below.
+2. **🐛 Bug Boss** — HP is tied 1:1 to your actual active lint/build error count (Syntax Wraith → NullPointerDemon → StackOverflow Behemoth → Overwhelmulus). Fixing an error does real damage; the soundtrack itself intensifies as this one grows — see **🎵 Room Music** below.
 3. **🧟 Code Smell Boss** — HP is the count of currently-open files over 300 lines (Spaghetti Sprite → Code Smell Ooze → Legacy Behemoth → Technical Debt Titan). Only scans files you actually have open, not the whole repo. The lowest-priority boss — it only shows once nothing more urgent is going on, matching "the chore everyone postpones."
 
 Clearing any of them to 0 **defeats the boss** for a bonus (+30 XP, +15 ☕), and counts toward your lifetime bosses-slain total (see **🎁 Year in Code Wrapped**). No active boss? The card reverts to the standard health-based Burnout Boss.
@@ -92,17 +94,55 @@ Every 30-second tick, there's a chance of a surprise event — good or bad:
 ### 📡 Activity Log
 A live scrollable feed inside the panel showing every recent XP gain, achievement unlock, random event, and level-up — colour-coded by type. A **📋 Standup** button right in the log header turns today's entries into a ready-to-paste "what I did today" post (see **Share Your Progress** below).
 
-### 🎵 Cyberpunk Music
-Procedurally synthesised ambient music generated entirely with the Web Audio API (no external files):
+### 🏙️ Unlockable Rooms
+The pixel-art scene moves with you as you level up — each room has its own art and its own soundtrack:
+
+| Room | Unlocks | Soundtrack |
+| :--- | :--- | :--- |
+| ☕ Corner Coffee Shop | Level 1 | Lo-fi: swung soft drums, triangle keys, vinyl crackle (80 BPM) |
+| ⛩️ Neon Dojo | Level 10 | The original cyberpunk track (118 BPM) |
+| 🌃 Neon Tokyo Office | Level 20 | City-pop synthwave: four-on-the-floor, octave-pumping bass (124 BPM) |
+| 🚀 Orbital Space Station | Level 35 | Ambient: sine pads, sonar pings, no drums (70 BPM) |
+
+By default you move in to each new room the moment it unlocks. Click the room badge on the scene to hop between unlocked rooms, or pin one (or switch back to Auto) from the Shop. Prestiging never takes a room away.
+
+### 🎵 Room Music
+Procedurally synthesised ambient music generated entirely with the Web Audio API (no external files). Every room has its own tempo, scale, instruments and drum pattern (see **Unlockable Rooms** above). Switching rooms while music is playing carries over at the next bar. The original Neon Dojo track has:
 - Driving kick & hi-hat pattern
 - Walking A-minor bass line
 - Pentatonic arpeggio with stereo movement
 - Slow-swelling pad chords every 2 bars
 - Sparse synth lead phrase every 4 bars
 
-**Dynamic Boss Music**: the whole mix intensifies as the Bug Boss grows — double-time kicks, a brighter/louder bass and arp, urgent 16th-note fills, and a low pulsing alarm siren once it's past 80% HP. The 🎵 icon flips to 👾 while it's playing in boss mode.
+**Dynamic Boss Music**: in every room, the whole mix intensifies as the Bug Boss grows — double-time kicks, a brighter/louder bass and arp, urgent 16th-note fills, and a low pulsing alarm siren once it's past 80% HP. The 🎵 icon flips to 👾 while it's playing in boss mode.
 
 Toggle it on/off with the **🎵 Music** button. Fades in and out smoothly.
+
+### 🆘 Rescue Missions
+Come back after **3+ days** without touching the editor (and not on Vacation Mode) and your developer has been *stranded*. Cobwebs and dust cover the scene, an SOS beeps, and a Rescue Mission banner appears:
+
+- 🧹 Blow the dust off: save 5 files
+- 🧠 Reboot the brain: code for 15 minutes
+- 📡 Send a signal home: make 1 commit
+
+The dust clears as each objective fills in. Finishing all three brings them home with **fully restored stats**, bonus XP and ☕ that scale with how long you were gone (up to +200 XP / +100 ☕), and **half of the streak your absence broke** back. The first rescue unlocks 🛟 *Welcome Home*.
+
+It's a welcome-back moment, not a punishment: starting a mission costs nothing, and there's no failure state. An unfinished mission quietly retires after 7 days. Planned time off? Turn on **Vacation Mode** and no mission triggers at all.
+
+### 🔊 8-bit Sound Effects
+Chiptune SFX, synthesised the same way as the music (no audio files), for the moments that matter:
+
+| Sound | Plays when |
+| :--- | :--- |
+| 🪙 Coin chime | You earn XP (every save, commit, quest…) |
+| 🎺 Fanfare | You level up or Prestige |
+| ✨ Item-get trill | You unlock an achievement |
+| 💥 Explosion + victory call | You defeat a boss |
+| 💰 Ka-ching | You buy something from the Shop or the Skill Tree |
+| 🆘 SOS (··· ––– ···) | A Rescue Mission starts |
+| 🛟 Rescue fanfare | You complete a Rescue Mission |
+
+They play whether or not music is on, and while the panel is open even in a background tab, so you hear the chime as you save. Big moments come first and they never pile up: a save that also levels you up plays the fanfare, then the achievement, not four sounds at once. Choose **All**, **Milestones only** (no per-save chime) or **Off** under ⚙️ Settings → 8-bit sound effects. Some webviews block audio until you first click inside the panel.
 
 ### 📜 Daily Quests
 Three randomised quests refresh each day:
@@ -226,6 +266,7 @@ See your teammates' progress without any server, accounts, or DevGotchi backend 
 - Your progress gets written to `.devgotchi/team/<you>.json` inside the repo. DevGotchi never runs git commands that change anything — you commit and push it yourself, the same way you already share every other file.
 - A new 👥 Team button opens a view of everyone who's enabled it: name, level, and streak, pulled from whatever's currently on disk (as fresh as your last `git pull`).
 - **Team Raid Boss**: once there's more than one teammate, the Team view also shows a shared HP bar — the whole team's combined active error count. Clear it together (drive the combined count to 0) and the first person to check the Team view after that gets a bonus (+25 XP, +20 ☕), then a fresh fight starts.
+- **Raid Boss MVP**: during a fight, the Raid Boss card shows each teammate's damage (bugs fixed since the fight started) with a 🏆 **MVP** tag on whoever leads; ties share it. When the boss falls, the final board stays up until the next fight and the clear toast names the MVP ("🏆 You were the MVP with 4 fixes!"). It's all worked out from the same git-synced snapshots, so it updates as teammates push. Damage is counted from when someone first opens the Team view during a fight, and it uses each teammate's lifetime bug-fix counter, so fixes in other projects during the fight count too.
 - Worth knowing: this makes your stats visible to anyone with access to the repo — it's an explicit opt-in, not a default.
 
 ---
@@ -296,7 +337,6 @@ See your teammates' progress without any server, accounts, or DevGotchi backend 
 ## 🗺️ Roadmap
 
 Ideas being considered, not yet built:
-- **Raid Boss MVP** — show each teammate's bug-fix contribution during a Team Raid Boss fight, with an "MVP" tag for whoever cleared the most.
 - **Code Smell Boss, function-length mode** — the current boss only counts bloated *files* (300+ lines); flagging individual bloated *functions* needs real per-language parsing and is a bigger, separate build.
 
 Have an idea? Use `DevGotchi: Send Feedback` — that's what it's there for.

@@ -21,13 +21,56 @@ interface CharacterClassDef {
   emoji: string;
   color: string; // Accent color used to retint the pixel-art scene (hoodie + glow) for this class
   description: string;
+  affinityLabel: string; // Short name for the class's home turf, shown in the save-bonus status bar flash
+  affinityLanguages: string[]; // VS Code languageIds whose saves earn LANGUAGE_AFFINITY_XP_MULTIPLIER (see resolveSavedLanguage)
 }
 
 const CLASSES: CharacterClassDef[] = [
-  { id: 'backend_mage', name: 'Backend Mage', emoji: '🔮', color: '#9d4edd', description: 'Git commits channel extra power: +25% XP from commits.' },
-  { id: 'frontend_rogue', name: 'Frontend Rogue', emoji: '🗡️', color: '#2dd4a5', description: 'Fast and precise: +25% XP from file saves.' },
-  { id: 'devops_paladin', name: 'DevOps Paladin', emoji: '🛡️', color: '#ffb020', description: 'Built for uptime: energy & motivation decay 15% slower.' }
+  {
+    id: 'backend_mage', name: 'Backend Mage', emoji: '🔮', color: '#9d4edd',
+    description: 'Git commits channel extra power: +25% XP from commits. Affinity: +50% save XP in backend languages (Python, Go, Rust, Java, C#, SQL…).',
+    affinityLabel: 'Backend',
+    affinityLanguages: ['python', 'go', 'rust', 'java', 'kotlin', 'scala', 'c', 'cpp', 'csharp', 'fsharp', 'ruby', 'php', 'elixir', 'erlang', 'haskell', 'clojure', 'sql', 'swift', 'dart', 'lua', 'perl', 'r', 'zig']
+  },
+  {
+    id: 'frontend_rogue', name: 'Frontend Rogue', emoji: '🗡️', color: '#2dd4a5',
+    description: 'Fast and precise: +25% XP from file saves. Affinity: +50% save XP in web languages (TypeScript, JavaScript, HTML, CSS, Vue, Svelte…).',
+    affinityLabel: 'Web',
+    affinityLanguages: ['typescript', 'typescriptreact', 'javascript', 'javascriptreact', 'html', 'css', 'scss', 'sass', 'less', 'stylus', 'vue', 'svelte', 'astro', 'mdx', 'handlebars', 'pug']
+  },
+  {
+    id: 'devops_paladin', name: 'DevOps Paladin', emoji: '🛡️', color: '#ffb020',
+    description: 'Built for uptime: energy & motivation decay 15% slower. Affinity: +50% save XP in infra languages (shell, Dockerfile, YAML, Terraform, Nix…).',
+    affinityLabel: 'Infra',
+    affinityLanguages: ['shellscript', 'powershell', 'bat', 'dockerfile', 'dockercompose', 'yaml', 'terraform', 'hcl', 'nix', 'makefile', 'cmake', 'toml', 'ini', 'properties', 'nginx', 'ansible', 'helm', 'jenkinsfile', 'groovy', 'github-actions-workflow', 'azure-pipelines', 'bicep']
+  }
 ];
+
+/**
+ * Language affinity: saving a file in one of your class's affinityLanguages
+ * multiplies that save's XP. Bonus-only by design: off-affinity saves keep
+ * the normal rate, so polyglot work never feels punished.
+ */
+const LANGUAGE_AFFINITY_XP_MULTIPLIER = 1.5;
+
+// Fallback for files VS Code only knows as 'plaintext' because the matching
+// language extension isn't installed (e.g. .tf without HashiCorp Terraform).
+// Keyed by lowercase file extension, or by the whole basename for files
+// that have none.
+const PLAINTEXT_LANGUAGE_FALLBACKS: Record<string, string> = {
+  '.tf': 'terraform', '.tfvars': 'terraform', '.hcl': 'hcl', '.nix': 'nix',
+  '.toml': 'toml', '.zig': 'zig', '.ex': 'elixir', '.exs': 'elixir',
+  '.svelte': 'svelte', '.astro': 'astro', '.vue': 'vue', '.bicep': 'bicep',
+  'dockerfile': 'dockerfile', 'containerfile': 'dockerfile', 'makefile': 'makefile', 'jenkinsfile': 'jenkinsfile'
+};
+
+/** The language a saved document should count as for class affinity. */
+function resolveSavedLanguage(doc: Pick<vscode.TextDocument, 'languageId' | 'fileName'>): string {
+  if (doc.languageId !== 'plaintext') return doc.languageId;
+  const base = path.basename(doc.fileName).toLowerCase();
+  const ext = path.extname(base);
+  return PLAINTEXT_LANGUAGE_FALLBACKS[ext] || PLAINTEXT_LANGUAGE_FALLBACKS[base.split('.')[0]] || 'plaintext';
+}
 
 const CLASS_RESPEC_COST = 200;
 
@@ -38,6 +81,34 @@ const CLASS_ANIM_FRAMES: Record<string, [string, string]> = {
   frontend_rogue: ['🗡️', '💨'],
   devops_paladin: ['🛡️', '⚡']
 };
+
+/**
+ * Rooms: unlockable pixel-art scene locations, each with its own matching
+ * ambient soundtrack (see ROOM_MUSIC in the webview). Purely cosmetic — a
+ * visible reward for leveling up. Unlocks are derived, never stored: a room
+ * is unlocked once `level >= minLevel`, or always once the developer has
+ * Prestiged (they've already reached the level cap, so Prestige's level reset
+ * never takes a room away). `equippedRoom: null` means "auto" — always show
+ * the newest unlocked room, so a level-up visibly moves you somewhere new.
+ */
+interface RoomDef {
+  id: string;
+  name: string;
+  emoji: string;
+  minLevel: number;
+  description: string;
+}
+
+const ROOMS: RoomDef[] = [
+  { id: 'coffee_shop', name: 'Corner Coffee Shop', emoji: '☕', minLevel: 1, description: 'Rainy window, warm lamps, lo-fi beats. Every journey starts with a latte.' },
+  { id: 'neon_dojo', name: 'Neon Dojo', emoji: '⛩️', minLevel: 10, description: 'Kaizen scroll, bonsai, glowing lotus. Code is a martial art.' },
+  { id: 'tokyo_office', name: 'Neon Tokyo Office', emoji: '🌃', minLevel: 20, description: 'Skyline windows, dual monitors, city-pop synthwave after dark.' },
+  { id: 'space_station', name: 'Orbital Space Station', emoji: '🚀', minLevel: 35, description: 'Earthrise through the porthole. Deploying to production from low orbit.' }
+];
+
+function isRoomUnlocked(room: RoomDef, dev: Pick<ProgrammerStats, 'level' | 'prestigeCount'>): boolean {
+  return (dev.prestigeCount || 0) > 0 || dev.level >= room.minLevel;
+}
 
 /**
  * Seasonal events: time-boxed content tied to a real-world month, recurring
@@ -375,6 +446,28 @@ const SHOP_ITEMS: ShopItem[] = [
   { id: LEGACY_DUNGEON_SKIN_ID, name: 'Legacy Slayer', type: 'skin', description: 'Earned by completing all 7 chapters of The Legacy Code Dungeon. Not for sale.', cost: 0, emoji: '💀', eventOnly: true }
 ];
 
+/**
+ * Rescue Mission: a welcome-back event after RESCUE_MISSION_ABSENCE_DAYS+
+ * days with no editor activity (and not on Vacation Mode, which is the
+ * "planned absence" path). Deliberately not a punishment — no extra stat
+ * hit, no failure state. It's a short multi-objective quest that turns
+ * coming back into a moment: finishing it fully restores stats, pays a bonus
+ * scaled by time away, and recovers half of the streak the absence broke.
+ * Unfinished missions quietly retire after RESCUE_MISSION_RETIRE_MS.
+ */
+interface RescueMission {
+  startedAt: number;
+  daysAway: number;
+  objectives: { type: 'save' | 'commit' | 'time'; label: string; target: number; progress: number }[];
+}
+
+const RESCUE_MISSION_ABSENCE_DAYS = 3;
+const RESCUE_MISSION_RETIRE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function rescueMissionReward(daysAway: number) {
+  return { xp: Math.min(200, 50 + daysAway * 10), coffee: Math.min(100, 30 + daysAway * 5) };
+}
+
 interface Quest {
   id: string;
   description: string;
@@ -423,6 +516,16 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+/** Inverse of escapeHtml, for showing already-escaped text somewhere plain-text (e.g. a VS Code toast). */
+function unescapeHtml(text: string): string {
+  return text
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&amp;/g, '&');
 }
 
 /**
@@ -517,6 +620,7 @@ const ACHIEVEMENTS: Achievement[] = [
   { id: 'commits_20',    name: 'Commit Machine',     icon: '📦',  description: 'Make 20 commits' },
   { id: 'coffee_500',    name: 'Caffeinated',        icon: '☕',  description: 'Earn 500 coffee beans total' },
   { id: 'survived_burnout', name: 'Back from the Edge', icon: '💀', description: 'Recover from full burnout' },
+  { id: 'welcome_home', name: 'Welcome Home', icon: '🛟', description: `Complete a Rescue Mission after ${RESCUE_MISSION_ABSENCE_DAYS}+ days away` },
   { id: 'quest_streak_5', name: 'Quest Master',     icon: '📜',  description: 'Complete quests 5 days in a row' },
   { id: 'focus_sprints_10', name: 'Deep Work',      icon: '⏱️',  description: 'Complete 10 Focus Sprints' },
   { id: 'night_owl',     name: 'Night Owl',          icon: '🦉',  description: 'Save a file between 3am and 4am', secret: true },
@@ -582,6 +686,10 @@ interface ProgrammerStats {
   packQuests?: Quest[]; // Quests imported from community Quest Packs (see importQuestPack) — persistent, not regenerated daily like developer.quests
   importedQuestPackIds?: string[]; // Pack ids already imported, so re-importing the same pack is a no-op instead of duplicating quests
   dailyMinutesCoded?: Record<string, number>; // "YYYY-MM-DD" -> minutes of actual (non-idle, non-vacation) coding that day — Timesheet Mode's source data
+  equippedRoom?: string | null; // Chosen ROOMS id for the pixel-art scene, or null for "auto" (newest unlocked room)
+  lastActiveAt?: number; // Last real editor activity (persisted, unlike DeveloperManager.lastActivityAt) — drives Rescue Mission absence detection
+  rescueMission?: RescueMission | null; // Active welcome-back Rescue Mission, if any
+  brokenStreak?: number; // Streak length the most recent missed-day reset wiped out — half is recovered by completing a Rescue Mission
 }
 
 /**
@@ -662,12 +770,14 @@ interface DevGotchiSettings {
   weeklyRecapEnabled: boolean;   // Show the weekly recap notification
   reduceNotifications: boolean;  // Suppress achievement-unlock popups (they still log to the Activity Log)
   decayRate: 'relaxed' | 'normal' | 'intense'; // Multiplier applied to stat decay speed
+  soundEffects: 'all' | 'milestones' | 'off'; // 8-bit SFX in the panel; 'milestones' drops the per-save XP chime
 }
 
 const DEFAULT_SETTINGS: DevGotchiSettings = {
   weeklyRecapEnabled: true,
   reduceNotifications: false,
-  decayRate: 'normal'
+  decayRate: 'normal',
+  soundEffects: 'all'
 };
 
 const DECAY_RATE_MULTIPLIERS: Record<DevGotchiSettings['decayRate'], number> = {
@@ -684,10 +794,13 @@ const DECAY_RATE_MULTIPLIERS: Record<DevGotchiSettings['decayRate'], number> = {
 function mergeSettings(raw: any): DevGotchiSettings {
   const allowedDecayRates: DevGotchiSettings['decayRate'][] = ['relaxed', 'normal', 'intense'];
   const decayRate = allowedDecayRates.includes(raw?.decayRate) ? raw.decayRate : DEFAULT_SETTINGS.decayRate;
+  const allowedSoundEffects: DevGotchiSettings['soundEffects'][] = ['all', 'milestones', 'off'];
+  const soundEffects = allowedSoundEffects.includes(raw?.soundEffects) ? raw.soundEffects : DEFAULT_SETTINGS.soundEffects;
   return {
     weeklyRecapEnabled: typeof raw?.weeklyRecapEnabled === 'boolean' ? raw.weeklyRecapEnabled : DEFAULT_SETTINGS.weeklyRecapEnabled,
     reduceNotifications: typeof raw?.reduceNotifications === 'boolean' ? raw.reduceNotifications : DEFAULT_SETTINGS.reduceNotifications,
-    decayRate
+    decayRate,
+    soundEffects
   };
 }
 
@@ -1161,11 +1274,12 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Listen for file saves to reward the user
   context.subscriptions.push(
-    vscode.workspace.onDidSaveTextDocument(() => {
+    vscode.workspace.onDidSaveTextDocument(doc => {
       devManager.recordActivity();
-      devManager.onCodeSaved();
+      devManager.onCodeSaved(resolveSavedLanguage(doc));
       devManager.updateLongFileCount(countOpenLongFiles());
       updateStatusBar();
+      DeveloperPanel.currentPanel?.updateDeveloper();
     })
   );
 
@@ -1177,13 +1291,13 @@ export function activate(context: vscode.ExtensionContext) {
   // updateStats() to pause decay (and put the avatar to sleep) once nothing
   // has fired for a while — going to lunch shouldn't tank your stats.
   context.subscriptions.push(
-    vscode.window.onDidChangeTextEditorSelection(() => devManager.recordActivity())
+    vscode.window.onDidChangeTextEditorSelection(() => { if (devManager.recordActivity()) DeveloperPanel.currentPanel?.updateDeveloper(); })
   );
   context.subscriptions.push(
-    vscode.window.onDidChangeActiveTextEditor(() => devManager.recordActivity())
+    vscode.window.onDidChangeActiveTextEditor(() => { if (devManager.recordActivity()) DeveloperPanel.currentPanel?.updateDeveloper(); })
   );
   context.subscriptions.push(
-    vscode.window.onDidChangeWindowState(state => { if (state.focused) devManager.recordActivity(); })
+    vscode.window.onDidChangeWindowState(state => { if (state.focused && devManager.recordActivity()) DeveloperPanel.currentPanel?.updateDeveloper(); })
   );
 
   // The "Passive Loop": Update stats every 30 seconds
@@ -1296,12 +1410,13 @@ export function activate(context: vscode.ExtensionContext) {
 // sync with package.json's "version" — there's no build step wiring the two
 // together, so it's a manual pair (same tradeoff the codebase already makes
 // elsewhere, e.g. duplicated color constants across the webview template).
-const WHATS_NEW_VERSION = '2.8.0';
+const WHATS_NEW_VERSION = '2.9.0';
 const WHATS_NEW_ITEMS: { icon: string; title: string; desc: string }[] = [
-  { icon: '📖', title: 'The Legacy Code Dungeon', desc: 'A 7-chapter narrative questline — one chapter unlocks per day as you complete each objective.' },
-  { icon: '🎁', title: 'Community Quest Packs', desc: 'Import shareable JSON quest packs from a file or URL — try the bundled "100 Days of Code" pack.' },
-  { icon: '🎲', title: 'Boss Affixes', desc: 'A weekly mutator (Diablo-rift style) rotates automatically every Monday — this week’s shown right on the panel.' },
-  { icon: '💼', title: 'Timesheet Mode', desc: 'Export your real coding time as a billable-hours CSV, right from Settings.' }
+  { icon: '🏙️', title: 'Unlockable Rooms', desc: 'Coffee Shop → Neon Dojo → Tokyo Office → Space Station: your scene and soundtrack change as you level up. Switch rooms from the scene badge or the Shop.' },
+  { icon: '🧬', title: 'Language Affinity', desc: 'Each class earns +50% save XP in its home languages: Mage in backend, Rogue in web, Paladin in infra.' },
+  { icon: '🔊', title: '8-bit Sound Effects', desc: 'Chiptune chimes for XP, level-ups, achievements, boss kills and purchases. Tune them in Settings.' },
+  { icon: '🆘', title: 'Rescue Missions', desc: 'Back after 3+ days away? Complete a welcome-back quest to restore your stats and win back half your streak.' },
+  { icon: '🏆', title: 'Raid Boss MVP', desc: 'The Team Raid Boss card now tracks each teammate’s fixes and crowns an MVP.' }
 ];
 
 /**
@@ -1525,6 +1640,40 @@ function getGitIdentity(gitPath: string, cwd: string, execFn?: ExecGitFn): { nam
 }
 
 /**
+ * Raid Boss MVP: each teammate's damage in the current fight is how much
+ * their lifetime totalBugsFixed has grown since the fight started (their
+ * "baseline", captured when the boss first came up, or when they first
+ * appear mid-fight). It's derived purely from the snapshots already synced
+ * through git, so it needs no new sync mechanism. Clamped at 0 so a
+ * teammate who reset their progress doesn't go negative. Everyone tied for
+ * the top score (if above 0) is MVP.
+ */
+interface RaidStanding { name: string; email: string; fixed: number; }
+
+function computeRaidStandings(snapshots: TeamMemberSnapshot[], baselines: Record<string, number>): { standings: RaidStanding[]; mvpEmails: string[] } {
+  const standings = snapshots.map(s => ({
+    name: s.name || s.email,
+    email: s.email,
+    fixed: Math.max(0, (s.totalBugsFixed || 0) - (baselines[s.email] ?? (s.totalBugsFixed || 0)))
+  })).sort((a, b) => b.fixed - a.fixed);
+  const top = standings.length ? standings[0].fixed : 0;
+  return { standings, mvpEmails: top > 0 ? standings.filter(s => s.fixed === top).map(s => s.email) : [] };
+}
+
+interface RaidResult { clearedAt: number; standings: RaidStanding[]; mvpEmails: string[]; }
+
+/** " 🏆 MVP: …" suffix for the raid-clear toast/log, or '' if nobody fixed anything. */
+function describeRaidMvp(raid: RaidResult | null, ownEmail: string | undefined): string {
+  if (!raid || !raid.mvpEmails.length) return '';
+  const mvps = raid.standings.filter(s => raid.mvpEmails.includes(s.email));
+  const fixes = mvps[0].fixed;
+  const ownEscaped = ownEmail ? escapeHtml(ownEmail) : undefined;
+  if (mvps.length === 1 && mvps[0].email === ownEscaped) return ` 🏆 You were the MVP with ${fixes} fix${fixes === 1 ? '' : 'es'}!`;
+  const names = mvps.map(m => (m.email === ownEscaped ? 'you' : unescapeHtml(m.name))).join(' & ');
+  return ` 🏆 MVP${mvps.length > 1 ? 's' : ''}: ${names} (${fixes} fix${fixes === 1 ? '' : 'es'}${mvps.length > 1 ? ' each' : ''})`;
+}
+
+/**
  * Manages Team Mode's on-disk state: enabling/disabling per workspace,
  * writing the current user's own snapshot file, and reading everyone's
  * snapshots back in for the Team view. Every git shell-out is injectable
@@ -1658,6 +1807,10 @@ class TeamManager {
         const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(path.join(this.teamDir, name)));
         const parsed = JSON.parse(Buffer.from(bytes).toString('utf8'));
         if (parsed && typeof parsed.email === 'string' && typeof parsed.level === 'number') {
+          // Teammates' files are untrusted input that the Team view renders
+          // via innerHTML, so escape the free-text fields once, here.
+          parsed.email = escapeHtml(parsed.email);
+          parsed.name = typeof parsed.name === 'string' ? escapeHtml(parsed.name) : '';
           snapshots.push(parsed);
         }
       } catch {
@@ -1678,10 +1831,18 @@ class TeamManager {
    * i.e. reward the transition, not just "HP happens to be 0 right now"
    * (which would re-fire the reward on every single panel refresh).
    */
-  async checkRaidBoss(snapshots: TeamMemberSnapshot[]): Promise<{ totalHp: number; peakHp: number; justCleared: boolean }> {
+  async checkRaidBoss(snapshots: TeamMemberSnapshot[]): Promise<{
+    totalHp: number; peakHp: number; justCleared: boolean;
+    standings: RaidStanding[]; mvpEmails: string[]; lastRaid: RaidResult | null;
+  }> {
     const totalHp = snapshots.reduce((sum, s) => sum + (s.activeErrorCount || 0), 0);
     let peak = this.context.workspaceState.get<number>('teamRaidBossPeakHp', 0);
     const wasUp = !!this.context.workspaceState.get('teamRaidBossUp');
+    // Per-teammate totalBugsFixed at the start of the current fight — see
+    // computeRaidStandings. Only observed when this runs (the Team view is
+    // open), so a fight's baseline is captured the first time anyone looks.
+    let baselines = this.context.workspaceState.get<Record<string, number>>('teamRaidBaselines', {});
+    let lastRaid = this.context.workspaceState.get<RaidResult | null>('teamRaidLastResult', null);
     let justCleared = false;
 
     if (totalHp > peak) {
@@ -1690,6 +1851,12 @@ class TeamManager {
     }
 
     if (totalHp > 0) {
+      if (!wasUp) baselines = {}; // A fresh fight — everyone starts from zero damage
+      let changed = !wasUp;
+      for (const s of snapshots) {
+        if (!(s.email in baselines)) { baselines[s.email] = s.totalBugsFixed || 0; changed = true; }
+      }
+      if (changed) await this.context.workspaceState.update('teamRaidBaselines', baselines);
       await this.context.workspaceState.update('teamRaidBossUp', true);
     } else if (wasUp && snapshots.length > 1) {
       // Only counts as a real "clear" if there's actually more than one
@@ -1697,11 +1864,15 @@ class TeamManager {
       // normal Bug Boss behavior, not a team achievement.
       justCleared = true;
       peak = 0;
+      lastRaid = { clearedAt: Date.now(), ...computeRaidStandings(snapshots, baselines) };
+      await this.context.workspaceState.update('teamRaidLastResult', lastRaid);
+      await this.context.workspaceState.update('teamRaidBaselines', {});
       await this.context.workspaceState.update('teamRaidBossUp', false);
       await this.context.workspaceState.update('teamRaidBossPeakHp', 0);
     }
 
-    return { totalHp, peakHp: peak, justCleared };
+    const live = totalHp > 0 ? computeRaidStandings(snapshots, baselines) : { standings: [], mvpEmails: [] };
+    return { totalHp, peakHp: peak, justCleared, ...live, lastRaid };
   }
 }
 
@@ -1792,6 +1963,10 @@ function normalizeDeveloper(saved: Partial<ProgrammerStats>): ProgrammerStats {
     packQuests: Array.isArray(saved.packQuests) ? saved.packQuests : [],
     importedQuestPackIds: Array.isArray(saved.importedQuestPackIds) ? saved.importedQuestPackIds : [],
     dailyMinutesCoded: saved.dailyMinutesCoded && typeof saved.dailyMinutesCoded === 'object' ? saved.dailyMinutesCoded : {},
+    lastActiveAt: typeof saved.lastActiveAt === 'number' ? saved.lastActiveAt : (typeof saved.lastUpdated === 'number' ? saved.lastUpdated : Date.now()),
+    rescueMission: saved.rescueMission && typeof saved.rescueMission === 'object' && Array.isArray(saved.rescueMission.objectives) ? saved.rescueMission : null,
+    brokenStreak: typeof saved.brokenStreak === 'number' ? saved.brokenStreak : 0,
+    equippedRoom: typeof saved.equippedRoom === 'string' && ROOMS.some(r => r.id === saved.equippedRoom) ? saved.equippedRoom : null,
     totalXpEarned,
     lastWeeklyRecapAt: saved.lastWeeklyRecapAt === undefined ? Date.now() : saved.lastWeeklyRecapAt,
     vacationMode: saved.vacationMode === undefined ? false : saved.vacationMode,
@@ -2088,9 +2263,17 @@ class DeveloperManager {
         this.developer.lastDailyBonus += elapsed;
       }
       this.developer.lastWeeklyRecapAt = (this.developer.lastWeeklyRecapAt || now) + elapsed;
+      this.developer.lastActiveAt = now; // A planned absence never triggers a Rescue Mission
       this.developer.mood = this.calculateMood();
       this.saveDeveloper();
       return;
+    }
+
+    // An unfinished Rescue Mission just quietly retires — no failure state.
+    const rescue = this.developer.rescueMission;
+    if (rescue && now - rescue.startedAt > RESCUE_MISSION_RETIRE_MS) {
+      this.developer.rescueMission = null;
+      this.addLog(`🛟 ${this.developer.name} found their own way home. (Rescue Mission retired)`, 'event');
     }
 
     // Idle detection: no real editor activity for IDLE_THRESHOLD_MS reads as
@@ -2290,8 +2473,91 @@ class DeveloperManager {
    * Marks real editor activity "now" — called from the workspace/window
    * event listeners wired up in activate(). See IDLE_THRESHOLD_MS.
    */
-  recordActivity() {
-    this.lastActivityAt = Date.now();
+  recordActivity(): boolean {
+    const now = Date.now();
+    this.lastActivityAt = now;
+    const lastActive = this.developer.lastActiveAt || now;
+    this.developer.lastActiveAt = now; // persisted with the next save (≤30s via the tick)
+    const dayMs = 24 * 60 * 60 * 1000;
+    if (!this.developer.vacationMode && !this.developer.rescueMission && now - lastActive >= RESCUE_MISSION_ABSENCE_DAYS * dayMs) {
+      this.startRescueMission(Math.floor((now - lastActive) / dayMs));
+      return true;
+    }
+    return false;
+  }
+
+  /** Kicks off the welcome-back Rescue Mission. See RescueMission. */
+  private startRescueMission(daysAway: number) {
+    this.developer.rescueMission = {
+      startedAt: Date.now(),
+      daysAway,
+      objectives: [
+        { type: 'save', label: 'Blow the dust off: save 5 files', target: 5, progress: 0 },
+        { type: 'time', label: 'Reboot the brain: code for 15 minutes', target: 15, progress: 0 },
+        { type: 'commit', label: 'Send a signal home: make 1 commit', target: 1, progress: 0 }
+      ]
+    };
+    const reward = rescueMissionReward(daysAway);
+    this.addLog(`🆘 ${this.developer.name} was stranded for ${daysAway} days — Rescue Mission started!`, 'event');
+    this.saveDeveloper();
+    vscode.window.showInformationMessage(
+      `${this.classTag()}🆘 ${this.developer.name} has been stranded for ${daysAway} days! Rescue Mission: save 5 files, code 15 minutes, make 1 commit — for fully restored stats, +${reward.xp} XP, +${reward.coffee} ☕ and part of your streak back.`,
+      'Open Panel'
+    ).then(choice => { if (choice === 'Open Panel') vscode.commands.executeCommand('devgotchi.openPanel'); });
+  }
+
+  /** Advances Rescue Mission objectives. Called from updateQuestProgress. */
+  private advanceRescueMission(type: 'save' | 'commit' | 'fix' | 'time', amount: number): boolean {
+    const mission = this.developer.rescueMission;
+    if (!mission) return false;
+    let updated = false;
+    mission.objectives.forEach(o => {
+      if (o.type === type && o.progress < o.target) {
+        o.progress = Math.min(o.target, o.progress + amount);
+        updated = true;
+      }
+    });
+    if (mission.objectives.every(o => o.progress >= o.target)) {
+      this.completeRescueMission(mission);
+      return true;
+    }
+    return updated;
+  }
+
+  private completeRescueMission(mission: RescueMission) {
+    const reward = rescueMissionReward(mission.daysAway);
+    this.developer.rescueMission = null;
+    this.developer.energy = 100;
+    this.developer.motivation = 100;
+    this.developer.focus = 100;
+    this.developer.health = 100;
+    this.developer.coffee += reward.coffee;
+    this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + reward.coffee;
+    this.addXP(reward.xp);
+    const recovered = Math.floor((this.developer.brokenStreak || 0) / 2);
+    this.developer.brokenStreak = 0;
+    if (recovered > 0) {
+      this.developer.streak = (this.developer.streak || 0) + recovered;
+      this.developer.longestStreak = Math.max(this.developer.longestStreak || 0, this.developer.streak);
+    }
+    const streakNote = recovered > 0 ? `, +${recovered} streak days recovered` : '';
+    this.addLog(`🛟 Rescue complete! ${this.developer.name} is home — stats restored, +${reward.xp} XP, +${reward.coffee} ☕${streakNote}`, 'achievement');
+    this.unlockAchievement('welcome_home');
+    vscode.window.showInformationMessage(`${this.classTag()}🛟 Rescue complete — welcome home, ${this.developer.name}! Stats fully restored, +${reward.xp} XP, +${reward.coffee} ☕${streakNote}.`);
+  }
+
+  /** Panel view of the active Rescue Mission, or null. */
+  getRescueMissionStatus() {
+    const mission = this.developer.rescueMission;
+    if (!mission) return null;
+    const reward = rescueMissionReward(mission.daysAway);
+    return {
+      daysAway: mission.daysAway,
+      objectives: mission.objectives,
+      rewardXp: reward.xp,
+      rewardCoffee: reward.coffee,
+      streakRecovery: Math.floor((this.developer.brokenStreak || 0) / 2)
+    };
   }
 
   /** Whether no real editor activity has been seen for IDLE_THRESHOLD_MS. */
@@ -2313,6 +2579,7 @@ class DeveloperManager {
     }
     this.developer.vacationMode = enabled;
     this.developer.vacationModeSince = enabled ? Date.now() : 0;
+    this.developer.lastActiveAt = Date.now();
     this.addLog(
       enabled ? '🌴 Vacation Mode enabled — stats and streak are frozen.' : '🌴 Vacation Mode disabled — welcome back!',
       'event'
@@ -2332,18 +2599,18 @@ class DeveloperManager {
    * clear (TeamManager already de-dupes the "just cleared" transition), so
    * this doesn't need its own idempotency check.
    */
-  teamRaidBossBonus(): { success: boolean; message: string } {
+  teamRaidBossBonus(mvpNote: string = ''): { success: boolean; message: string } {
     this.addXP(TEAM_RAID_BOSS_DEFEAT_BONUS_XP);
     this.developer.coffee += TEAM_RAID_BOSS_DEFEAT_BONUS_COFFEE;
     this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + TEAM_RAID_BOSS_DEFEAT_BONUS_COFFEE;
     this.addLog(
-      `🐉 Team Raid Boss defeated! +${TEAM_RAID_BOSS_DEFEAT_BONUS_XP} XP, +${TEAM_RAID_BOSS_DEFEAT_BONUS_COFFEE} ☕`,
+      `🐉 Team Raid Boss defeated! +${TEAM_RAID_BOSS_DEFEAT_BONUS_XP} XP, +${TEAM_RAID_BOSS_DEFEAT_BONUS_COFFEE} ☕${mvpNote}`,
       'achievement'
     );
     this.saveDeveloper();
     return {
       success: true,
-      message: `🐉 Team Raid Boss defeated! +${TEAM_RAID_BOSS_DEFEAT_BONUS_XP} XP, +${TEAM_RAID_BOSS_DEFEAT_BONUS_COFFEE} ☕ — nice work, team.`
+      message: `🐉 Team Raid Boss defeated! +${TEAM_RAID_BOSS_DEFEAT_BONUS_XP} XP, +${TEAM_RAID_BOSS_DEFEAT_BONUS_COFFEE} ☕ — nice work, team.${mvpNote}`
     };
   }
 
@@ -2426,6 +2693,8 @@ class DeveloperManager {
       if (lastBonus > 0 && now - lastBonus < twoDays) {
         this.developer.streak = (this.developer.streak || 0) + 1;
       } else {
+        // Remembered so a Rescue Mission can give half of it back.
+        if (lastBonus > 0 && (this.developer.streak || 0) > 1) this.developer.brokenStreak = this.developer.streak;
         this.developer.streak = 1;
       }
       this.developer.longestStreak = Math.max(this.developer.longestStreak || 0, this.developer.streak);
@@ -2562,8 +2831,10 @@ class DeveloperManager {
   
   /**
    * Event: Triggered when a file is saved. Small boost to motivation and coffee.
+   * `languageId` drives the class language-affinity bonus (see
+   * LANGUAGE_AFFINITY_XP_MULTIPLIER); omitted means "unknown", no bonus.
    */
-  onCodeSaved() {
+  onCodeSaved(languageId?: string) {
     if (!this.developer.achievements.includes('first_save')) {
       this.developer.achievements.push('first_save');
       const ach = ACHIEVEMENTS.find(a => a.id === 'first_save')!;
@@ -2574,15 +2845,22 @@ class DeveloperManager {
     this.developer.motivation = Math.min(100, this.developer.motivation + 3);
     this.developer.coffee += 1;
     this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + 1;
-    const saveXp = this.developer.characterClass === 'frontend_rogue' ? 4 : 3; // +25% XP from saves
+    const baseSaveXp = this.developer.characterClass === 'frontend_rogue' ? 4 : 3; // +25% XP from saves
+    const classInfo = this.getClassInfo();
+    const affinity = !!(classInfo && languageId && classInfo.affinityLanguages.includes(languageId));
+    const saveXp = affinity ? Math.round(baseSaveXp * LANGUAGE_AFFINITY_XP_MULTIPLIER) : baseSaveXp;
     this.addXP(saveXp);
-    this.addLog(`📝 File saved  +${saveXp} XP  +1 ☕`, 'xp');
+    // Keep the "📝 File saved" prefix — the Standup generator counts saves by it.
+    const langTag = languageId && languageId !== 'plaintext' ? ` (${languageId}${affinity ? ' ✦' : ''})` : '';
+    this.addLog(`📝 File saved${langTag}  +${saveXp} XP  +1 ☕`, 'xp');
     this.updateQuestProgress('save');
     this.checkAchievements();
     this.saveDeveloper();
-    // Saves fire far too often for a modal toast, so the Rogue's bonus gets a
-    // quick, self-dismissing status bar flash instead of an interruption.
-    if (this.developer.characterClass === 'frontend_rogue') {
+    // Saves fire far too often for a modal toast, so class save bonuses get
+    // a quick, self-dismissing status bar flash instead of an interruption.
+    if (affinity && classInfo) {
+      vscode.window.setStatusBarMessage(`${classInfo.emoji} ${classInfo.affinityLabel} affinity ✦ +${saveXp} XP (${languageId})`, 2500);
+    } else if (this.developer.characterClass === 'frontend_rogue') {
       vscode.window.setStatusBarMessage(`🗡️ Frontend Rogue +${saveXp} XP (save bonus)`, 2500);
     }
   }
@@ -3037,6 +3315,7 @@ class DeveloperManager {
       updated = this.advanceQuestList(this.developer.packQuests, type, amount) || updated;
     }
     updated = this.advanceLegacyDungeon(type, amount) || updated;
+    updated = this.advanceRescueMission(type, amount) || updated;
 
     // Check if all quests are completed for the day
     if (!this.developer.dailyQuestsCompleted && this.developer.quests.length > 0 && this.developer.quests.every(q => q.completed)) {
@@ -3155,6 +3434,25 @@ class DeveloperManager {
   }
 
   /**
+   * Picks the pixel-art scene room. Pass null to go back to "auto" (always
+   * the newest unlocked room). Locked rooms are rejected, so a stale/edited
+   * webview message can't skip the level gate.
+   */
+  equipRoom(roomId: string | null) {
+    if (roomId === null) {
+      this.developer.equippedRoom = null;
+      this.saveDeveloper();
+      return { success: true, message: 'Room set to auto — you\'ll move in to each new room as it unlocks.' };
+    }
+    const room = ROOMS.find(r => r.id === roomId);
+    if (!room) return { success: false, message: 'Room not found' };
+    if (!isRoomUnlocked(room, this.developer)) return { success: false, message: `${room.emoji} ${room.name} unlocks at Level ${room.minLevel}.` };
+    this.developer.equippedRoom = room.id;
+    this.saveDeveloper();
+    return { success: true, message: `Moved in to ${room.emoji} ${room.name}` };
+  }
+
+  /**
    * Event: Triggered when a mini-game challenge is completed.
    */
   challengeCompleted(score: number) {
@@ -3270,6 +3568,7 @@ class DeveloperManager {
     this.developer.totalXpEarned = (this.developer.totalXpEarned || 0) + gained;
 
     let leveledUp = false;
+    const levelBefore = this.developer.level;
     let xpNeeded = this.developer.level * 100;
 
     // Level is capped at PRESTIGE_LEVEL_REQUIREMENT — past that, XP still
@@ -3287,6 +3586,15 @@ class DeveloperManager {
     if (leveledUp) {
       this.addLog(`🎉 LEVEL UP → Level ${this.developer.level}!`, 'achievement');
       vscode.window.showInformationMessage(`${this.classTag()}🎉 ${this.developer.name} leveled up to Level ${this.developer.level}!`);
+      // Prestiged players already have every room, so only first-time
+      // threshold crossings count as a new unlock.
+      if (!(this.developer.prestigeCount || 0)) {
+        ROOMS.filter(r => r.minLevel > levelBefore && r.minLevel <= this.developer.level).forEach(room => {
+          this.addLog(`${room.emoji} New room unlocked: ${room.name}`, 'achievement');
+          const autoNote = this.developer.equippedRoom ? ' Switch to it from the Shop.' : ' Moving in now!';
+          vscode.window.showInformationMessage(`${this.classTag()}${room.emoji} New room unlocked: ${room.name} — with its own soundtrack.${autoNote}`);
+        });
+      }
     }
   }
 
@@ -3360,6 +3668,7 @@ class DeveloperPanel {
         case 'unlock-skill': this.updatePanel(this.devManager.unlockSkill(message.skillId)); break;
         case 'buy-item': this.updatePanel(this.devManager.buyItem(message.itemId)); break;
         case 'equip-item': this.updatePanel(this.devManager.equipItem(message.itemId)); break;
+        case 'equip-room': this.updatePanel(this.devManager.equipRoom(typeof message.roomId === 'string' ? message.roomId : null)); break;
         case 'choose-class': this.devManager.chooseClass().then(result => this.updatePanel(result)); break;
         case 'challenge-completed': {
           const coffee = this.devManager.challengeCompleted(message.score);
@@ -3465,7 +3774,8 @@ class DeveloperPanel {
       teamEnabled: this.teamManager?.isEnabled() ?? false,
       seasonalStatus: this.devManager.getSeasonalStatus(),
       bossAffix: this.devManager.getBossAffixStatus(),
-      legacyDungeon: this.devManager.getLegacyDungeonStatus()
+      legacyDungeon: this.devManager.getLegacyDungeonStatus(),
+      rescueMission: this.devManager.getRescueMissionStatus()
     });
   }
 
@@ -3523,7 +3833,7 @@ class DeveloperPanel {
     const snapshots = await this.teamManager.readTeamSnapshots();
     const raidBoss = await this.teamManager.checkRaidBoss(snapshots);
     if (raidBoss.justCleared) {
-      const result = this.devManager.teamRaidBossBonus();
+      const result = this.devManager.teamRaidBossBonus(describeRaidMvp(raidBoss.lastRaid, this.teamManager.getOwnEmail()));
       vscode.window.showInformationMessage(result.message);
       this.updateDeveloper();
     }
@@ -3532,9 +3842,13 @@ class DeveloperPanel {
       snapshots,
       enabled: this.teamManager.isEnabled(),
       available: this.teamManager.isAvailable(),
-      ownEmail: this.teamManager.getOwnEmail(),
+      // Escaped to match readTeamSnapshots' escaped emails for the "(you)" check
+      ownEmail: (() => { const own = this.teamManager.getOwnEmail(); return own ? escapeHtml(own) : undefined; })(),
       raidBossHp: raidBoss.totalHp,
-      raidBossPeakHp: raidBoss.peakHp
+      raidBossPeakHp: raidBoss.peakHp,
+      raidStandings: raidBoss.standings,
+      raidMvpEmails: raidBoss.mvpEmails,
+      lastRaid: raidBoss.lastRaid
     });
   }
 
@@ -3630,6 +3944,22 @@ class DeveloperPanel {
       line-height: 1;
       cursor: pointer;
     }
+
+    .scene-room-badge {
+      position: absolute;
+      bottom: 8px;
+      right: 10px;
+      font-size: 10px;
+      letter-spacing: 1px;
+      color: var(--text-main);
+      background: rgba(6, 6, 18, 0.75);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 4px 7px;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .scene-room-badge:hover { border-color: var(--neon-purple); }
 
     .dev-name {
       font-size: 18px;
@@ -4248,6 +4578,10 @@ class DeveloperPanel {
       transition: width 0.3s;
     }
     .raid-boss-hp-text { font-size: 10px; color: var(--text-dim); margin-top: 6px; }
+    .raid-mvp-heading { font-size: 10px; letter-spacing: 1px; color: var(--text-dim); margin: 10px 0 4px; text-transform: uppercase; }
+    .raid-mvp-row { display: flex; justify-content: space-between; font-size: 11px; padding: 3px 0; border-top: 1px solid var(--border); }
+    .raid-mvp-row.mvp { color: var(--neon-gold); font-weight: bold; }
+    .mvp-tag { font-size: 9px; letter-spacing: 1px; border: 1px solid var(--neon-gold); border-radius: 2px; padding: 0 4px; margin-left: 4px; }
     .raid-boss-card.cleared { border-color: #006633; }
     .raid-boss-card.cleared .raid-boss-title { color: var(--neon-green); }
     .raid-boss-card.cleared .raid-boss-track { border-color: #006633; }
@@ -4428,6 +4762,7 @@ class DeveloperPanel {
           <div class="scene-wrap">
             <canvas id="sceneCanvas" width="440" height="200"></canvas>
             <div id="devAvatar" class="scene-mood-badge" onclick="showRenameModal()" title="Click to rename">👨‍💻</div>
+            <div id="roomBadge" class="scene-room-badge" onclick="cycleRoom()" title="Click to switch rooms">☕ Corner Coffee Shop</div>
           </div>
           <div class="resources-row">
             <div class="resource-chip">
@@ -4537,7 +4872,7 @@ class DeveloperPanel {
           <button id="btn-quests" class="action-btn" onclick="showQuests()" title="Daily Quests">
             <div class="action-icon">📜</div><div class="action-label">Quests</div>
           </button>
-          <button id="btn-music" class="action-btn" onclick="toggleMusic()" title="Toggle cyberpunk music">
+          <button id="btn-music" class="action-btn" onclick="toggleMusic()" title="Toggle room music — each room has its own soundtrack">
             <div class="action-icon" id="musicIcon">🎵</div><div class="action-label" id="musicLabel">Music</div>
           </button>
           <button id="btn-achievements" class="action-btn" onclick="showAchievements()" title="Achievements">
@@ -4632,6 +4967,7 @@ class DeveloperPanel {
       <div id="burnoutBanner" style="display:none; background: linear-gradient(90deg, #7a0000, #ff1744); padding: 10px 16px; margin-bottom: 10px; border-radius: 3px; font-size: 12px; letter-spacing: 2px; text-align:center; animation: burnoutPulse 1s ease-in-out infinite;">
         ☠ CRITICAL BURNOUT — TAKE A BREAK TO RECOVER ☠
       </div>
+      <div id="rescueBanner" style="display:none; background: linear-gradient(90deg, #12204a, #b5521b); padding: 10px 16px; margin-bottom: 10px; border-radius: 3px; font-size: 12px; letter-spacing: 1px; border: 1px solid #ff9e40;"></div>
       <div id="vacationBanner" style="display:none; background: linear-gradient(90deg, #0d4d3a, #14a67a); padding: 10px 16px; margin-bottom: 10px; border-radius: 3px; font-size: 12px; letter-spacing: 1px; text-align:center;">
         🌴 VACATION MODE — stats and streak are frozen. Turn it off in Settings when you're back.
       </div>
@@ -4734,6 +5070,14 @@ class DeveloperPanel {
               <option value="intense">Intense (faster decay)</option>
             </select>
           </div>
+          <div class="settings-row">
+            <label class="settings-label" style="display:block; margin-bottom:6px; cursor:default;">8-bit sound effects</label>
+            <select id="setSoundEffects" class="modal-input" onchange="if (this.value !== 'off') previewSfx()">
+              <option value="all">All (XP chime on every save)</option>
+              <option value="milestones">Milestones only (level-up, achievements, bosses)</option>
+              <option value="off">Off</option>
+            </select>
+          </div>
           <div class="modal-buttons" style="margin-top:8px;">
             <button onclick="closeSettingsModal()">CANCEL</button>
             <button onclick="saveSettingsForm()">SAVE</button>
@@ -4804,6 +5148,31 @@ class DeveloperPanel {
         let currentChallenge = null;
         let currentDev = null;
         let currentSettings = null;
+        let currentRescue = null;
+
+        // 1 = fully neglected scene (thick cobwebs/dust), 0 = clean. Clears
+        // as Rescue Mission objectives fill in.
+        function rescueDust(rescue) {
+          if (!rescue) return 0;
+          const done = rescue.objectives.reduce((sum, o) => sum + Math.min(1, o.progress / o.target), 0);
+          return 1 - done / rescue.objectives.length;
+        }
+
+        function renderRescueBanner(rescue, devName) {
+          const el = document.getElementById('rescueBanner');
+          if (!rescue) { el.style.display = 'none'; return; }
+          el.style.display = 'block';
+          const rows = rescue.objectives.map(o => {
+            const pct = Math.min(100, Math.round(o.progress / o.target * 100));
+            const done = o.progress >= o.target;
+            return '<div style="margin-top:6px;"><div style="display:flex; justify-content:space-between; gap:8px;"><span>' + (done ? '✅ ' : '◻️ ') + o.label + '</span><span>' + Math.floor(o.progress) + '/' + o.target + '</span></div>'
+              + '<div style="height:4px; background:rgba(0,0,0,0.35); border-radius:1px; margin-top:3px;"><div style="height:100%; width:' + pct + '%; background:#ffd740; box-shadow:0 0 6px #ffd740;"></div></div></div>';
+          }).join('');
+          const streakNote = rescue.streakRecovery > 0 ? ', +' + rescue.streakRecovery + ' streak days back' : '';
+          el.innerHTML = '<div style="font-weight:bold; text-align:center; color:#fff;">🆘 RESCUE MISSION — ' + devName + ' was stranded for ' + rescue.daysAway + ' days</div>'
+            + rows
+            + '<div style="margin-top:8px; text-align:center; opacity:0.9;">Reward: 💯 stats restored, +' + rescue.rewardXp + ' XP, +' + rescue.rewardCoffee + ' ☕' + streakNote + '</div>';
+        }
         let teamAvailable = false;
         let teamEnabled = false;
         let currentSeasonalStatus = null;
@@ -4812,6 +5181,36 @@ class DeveloperPanel {
         const SHOP_ITEMS = ${JSON.stringify(SHOP_ITEMS)};
         const CLASSES = ${JSON.stringify(CLASSES)};
         const CLASS_RESPEC_COST = ${CLASS_RESPEC_COST};
+        const ROOMS = ${JSON.stringify(ROOMS)};
+
+        // Mirrors isRoomUnlocked() on the extension side — the host
+        // re-validates on 'equip-room', this is just for display.
+        function isRoomUnlocked(room, dev) {
+          return ((dev && dev.prestigeCount) || 0) > 0 || ((dev && dev.level) || 1) >= room.minLevel;
+        }
+        // The room actually shown: the pinned one if still unlocked,
+        // otherwise ("auto") the newest unlocked room.
+        function getActiveRoom(dev) {
+          const unlocked = ROOMS.filter(r => isRoomUnlocked(r, dev));
+          return unlocked.find(r => dev && r.id === dev.equippedRoom) || unlocked[unlocked.length - 1] || ROOMS[0];
+        }
+        function equipRoom(id) { vscode.postMessage({ command: 'equip-room', roomId: id }); }
+        // Scene badge click: hop to the next unlocked room (wrapping).
+        function cycleRoom() {
+          if (!currentDev) return;
+          const unlocked = ROOMS.filter(r => isRoomUnlocked(r, currentDev));
+          if (unlocked.length < 2) { showShop(); return; }
+          const idx = unlocked.findIndex(r => r.id === getActiveRoom(currentDev).id);
+          equipRoom(unlocked[(idx + 1) % unlocked.length].id);
+        }
+        function updateRoomBadge(dev) {
+          const badge = document.getElementById('roomBadge');
+          if (!badge) return;
+          const room = getActiveRoom(dev);
+          const next = ROOMS.find(r => !isRoomUnlocked(r, dev));
+          badge.textContent = room.emoji + ' ' + room.name;
+          badge.title = room.description + (next ? ' — Next room: ' + next.emoji + ' ' + next.name + ' at Level ' + next.minLevel + '.' : '') + ' Click to switch rooms.';
+        }
 
         // ── SETTINGS ──
         function showSettingsModal() {
@@ -4824,6 +5223,7 @@ class DeveloperPanel {
             document.getElementById('setWeeklyRecap').checked = currentSettings.weeklyRecapEnabled !== false;
             document.getElementById('setReduceNotifications').checked = !!currentSettings.reduceNotifications;
             document.getElementById('setDecayRate').value = currentSettings.decayRate || 'normal';
+            document.getElementById('setSoundEffects').value = currentSettings.soundEffects || 'all';
           }
           if (currentDev) {
             document.getElementById('setVacationMode').checked = !!currentDev.vacationMode;
@@ -4843,7 +5243,8 @@ class DeveloperPanel {
           const settings = {
             weeklyRecapEnabled: document.getElementById('setWeeklyRecap').checked,
             reduceNotifications: document.getElementById('setReduceNotifications').checked,
-            decayRate: document.getElementById('setDecayRate').value
+            decayRate: document.getElementById('setDecayRate').value,
+            soundEffects: document.getElementById('setSoundEffects').value
           };
           vscode.postMessage({ command: 'save-settings', settings });
           closeSettingsModal();
@@ -4904,6 +5305,20 @@ class DeveloperPanel {
             html += '<div class="raid-boss-title">' + (cleared ? '🎉 Raid Boss Defeated!' : '👹 Team Raid Boss') + '</div>';
             html += '<div class="raid-boss-track"><div class="raid-boss-fill" style="width:' + pct + '%"></div></div>';
             html += '<div class="raid-boss-hp-text">' + hp + ' combined bug' + (hp === 1 ? '' : 's') + ' across the team</div>';
+            // MVP board: live damage during a fight, the final result once cleared
+            const board = cleared ? (data.lastRaid && data.lastRaid.standings) : data.raidStandings;
+            const mvps = (cleared ? (data.lastRaid && data.lastRaid.mvpEmails) : data.raidMvpEmails) || [];
+            if (board && board.length) {
+              html += '<div class="raid-mvp-heading">' + (cleared
+                ? 'Final damage — cleared ' + new Date(data.lastRaid.clearedAt).toLocaleDateString()
+                : 'Damage this fight (bugs fixed)') + '</div>';
+              board.forEach(s => {
+                const isYou = data.ownEmail && s.email === data.ownEmail;
+                const isMvp = mvps.indexOf(s.email) !== -1;
+                html += '<div class="raid-mvp-row' + (isMvp ? ' mvp' : '') + '"><span>' + s.name + (isYou ? ' (you)' : '')
+                  + (isMvp ? ' <span class="mvp-tag">🏆 MVP</span>' : '') + '</span><span>⚔️ ' + s.fixed + '</span></div>';
+              });
+            }
             html += '</div>';
           }
           html += '<table class="leaderboard-table"><thead><tr><th>Dev</th><th>Lvl</th><th>Streak</th><th>Bugs</th></tr></thead><tbody>';
@@ -5021,6 +5436,25 @@ class DeveloperPanel {
             + (classInfo ? classInfo.emoji + ' ' + classInfo.name : '🎭 No Class')
             + '</span><span class="skill-desc">' + (classInfo ? classInfo.description : 'Pick a class for a permanent passive bonus.')
             + '</span></div><div>' + classBtnHtml + '</div></div>';
+
+          // Rooms: earned by leveling, never bought — so they get their own
+          // section with level locks instead of BUY buttons.
+          const activeRoom = getActiveRoom(currentDev);
+          const autoRoom = !currentDev.equippedRoom;
+          list.innerHTML += '<div class="skill-item"><div class="skill-info"><span class="skill-name">🏙️ Rooms</span><span class="skill-desc">'
+            + 'New scenes + soundtracks unlock as you level up. Auto always moves you in to the newest one.</span></div><div>'
+            + (autoRoom ? '<span class="unlocked-badge">✓ AUTO</span>' : '<button class="skill-btn" onclick="equipRoom(null)">AUTO</button>')
+            + '</div></div>';
+          ROOMS.forEach(room => {
+            const unlocked = isRoomUnlocked(room, currentDev);
+            let btnHtml;
+            if (!unlocked) btnHtml = '<span class="cant-afford">🔒 LV ' + room.minLevel + '</span>';
+            else if (room.id === activeRoom.id && !autoRoom) btnHtml = '<span class="unlocked-badge">✓ HERE</span>';
+            else if (room.id === activeRoom.id) btnHtml = '<span class="active-badge">◈ HERE</span>';
+            else btnHtml = '<button class="skill-btn" onclick="equipRoom(\\'' + room.id + '\\')">MOVE IN</button>';
+            list.innerHTML += '<div class="skill-item"' + (unlocked ? '' : ' style="opacity:0.55"') + '><div class="skill-info"><span class="skill-name">'
+              + room.emoji + ' ' + room.name + '</span><span class="skill-desc">' + room.description + '</span></div><div>' + btnHtml + '</div></div>';
+          });
 
           SHOP_ITEMS.forEach(item => {
             const owned = currentDev.inventory && currentDev.inventory.includes(item.id);
@@ -5197,8 +5631,10 @@ class DeveloperPanel {
           const m = event.data;
           if (m.command === 'update') {
             const dev = m.developer;
+            const prevDev = currentDev;
             currentDev = dev;
             if (m.settings) currentSettings = m.settings;
+            playSfxForUpdate(prevDev, dev);
             teamAvailable = !!m.teamAvailable;
             teamEnabled = !!m.teamEnabled;
             document.getElementById('btn-team').style.display = (teamAvailable || teamEnabled) ? 'flex' : 'none';
@@ -5210,6 +5646,8 @@ class DeveloperPanel {
             }
             currentSeasonalStatus = m.seasonalStatus || null;
             currentLegacyDungeon = m.legacyDungeon || null;
+            currentRescue = m.rescueMission || null;
+            renderRescueBanner(currentRescue, dev.name);
             const seasonalBanner = document.getElementById('seasonalBanner');
             if (currentSeasonalStatus) {
               const s = currentSeasonalStatus;
@@ -5251,7 +5689,8 @@ class DeveloperPanel {
             document.getElementById('devAvatar').textContent = dev.mood === 'sleeping' ? '💤' : dev.role;
             // Redraw scene with current mood
             const sc = document.getElementById('sceneCanvas');
-            if (sc) drawScene(sc, dev.mood, dev.characterClass);
+            if (sc) drawScene(sc, dev.mood, dev.characterClass, getActiveRoom(dev).id, rescueDust(currentRescue));
+            updateRoomBadge(dev);
             const calC = document.getElementById('streakCalCanvas');
             if (calC) drawStreakCalendar(calC, dev.activityDates);
             const prestigeCount = dev.prestigeCount || 0;
@@ -5746,13 +6185,136 @@ class DeveloperPanel {
           }
         }
 
-        function drawScene(canvas, mood, characterClass) {
-          const ctx = canvas.getContext('2d');
-          ctx.imageSmoothingEnabled = false;
-          const W = canvas.width, H = canvas.height;
-          const theme = CLASS_THEME[characterClass] || DEFAULT_CLASS_THEME;
-          const floorY = 148;
+        // Deterministic PRNG so starfields / rain / lit windows don't
+        // reshuffle on every redraw (the scene repaints on each update).
+        function seededRandom(seed) {
+          return function() {
+            seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+            let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+            t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+            return ((t ^ t >>> 14) >>> 0) / 4294967296;
+          };
+        }
 
+        function drawSteam(ctx, x, y) {
+          ctx.strokeStyle = 'rgba(230,220,210,0.28)';
+          ctx.lineWidth = 1.2;
+          [-3, 3].forEach(dx => {
+            ctx.beginPath();
+            ctx.moveTo(x + dx, y);
+            ctx.bezierCurveTo(x + dx - 4, y - 5, x + dx + 4, y - 9, x + dx, y - 15);
+            ctx.stroke();
+          });
+        }
+
+        // ── Room: Corner Coffee Shop (Lv 1) ─────────────────────────────
+        function drawCoffeeShopRoom(ctx, W, H, floorY) {
+          const rand = seededRandom(7);
+          // Warm wall
+          const bg = ctx.createLinearGradient(0, 0, 0, floorY);
+          bg.addColorStop(0, '#120a08');
+          bg.addColorStop(1, '#22140d');
+          ctx.fillStyle = bg; ctx.fillRect(0, 0, W, floorY);
+          // Wainscoting strip
+          ctx.fillStyle = '#2b190f'; ctx.fillRect(0, floorY - 26, W, 26);
+          ctx.fillStyle = '#3a2214'; ctx.fillRect(0, floorY - 28, W, 2);
+
+          // Wood plank floor
+          ctx.fillStyle = '#1c0f08'; ctx.fillRect(0, floorY, W, H - floorY);
+          ctx.strokeStyle = '#2a170c'; ctx.lineWidth = 1;
+          for (let y = floorY + 9, row = 0; y <= H; y += 11, row++) {
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+            for (let x = (row % 2) * 35; x < W; x += 70) {
+              ctx.beginPath(); ctx.moveTo(x, y - 11); ctx.lineTo(x, y); ctx.stroke();
+            }
+          }
+
+          // Rainy night window (left)
+          const wx = 16, wy = 14, ww = 136, wh = 92;
+          const sky = ctx.createLinearGradient(0, wy, 0, wy + wh);
+          sky.addColorStop(0, '#070b1c'); sky.addColorStop(1, '#16183a');
+          ctx.fillStyle = sky; ctx.fillRect(wx, wy, ww, wh);
+          for (let i = 0; i < 9; i++) {
+            const bw = 10 + rand() * 14, bh = 20 + rand() * 46, bx = wx + i * 15;
+            ctx.fillStyle = '#0b0d22'; ctx.fillRect(bx, wy + wh - bh, bw, bh);
+            for (let k = 0; k < 4; k++) {
+              if (rand() < 0.5) continue;
+              ctx.fillStyle = rand() < 0.5 ? 'rgba(255,200,110,0.55)' : 'rgba(120,200,255,0.4)';
+              ctx.fillRect(bx + 2 + Math.floor(rand() * (bw - 4)), wy + wh - bh + 4 + Math.floor(rand() * (bh - 8)), 2, 2);
+            }
+          }
+          ctx.strokeStyle = 'rgba(160,190,255,0.22)'; ctx.lineWidth = 1;
+          for (let i = 0; i < 34; i++) {
+            const rx = wx + rand() * ww, ry = wy + rand() * (wh - 10);
+            ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx - 3, ry + 9); ctx.stroke();
+          }
+          // Frame + mullions
+          ctx.strokeStyle = '#4a2c18'; ctx.lineWidth = 4;
+          ctx.strokeRect(wx, wy, ww, wh);
+          ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.moveTo(wx + ww / 2, wy); ctx.lineTo(wx + ww / 2, wy + wh); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(wx, wy + wh / 2); ctx.lineTo(wx + ww, wy + wh / 2); ctx.stroke();
+          ctx.fillStyle = '#3a2214'; ctx.fillRect(wx - 6, wy + wh, ww + 12, 6); // sill
+          // Neon OPEN sign in the window
+          ctx.save();
+          ctx.shadowColor = '#ff4f9a'; ctx.shadowBlur = 10;
+          ctx.strokeStyle = '#ff4f9a'; ctx.lineWidth = 1.5;
+          roundRect(ctx, wx + 14, wy + 12, 44, 18, 4); ctx.stroke();
+          ctx.fillStyle = '#ff7ab6'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+          ctx.fillText('OPEN', wx + 36, wy + 25);
+          ctx.restore();
+
+          // Chalkboard menu (right)
+          ctx.fillStyle = '#4a2c18'; ctx.fillRect(300, 14, 116, 78);
+          ctx.fillStyle = '#121a14'; ctx.fillRect(304, 18, 108, 70);
+          ctx.fillStyle = 'rgba(235,235,225,0.82)';
+          ctx.font = 'bold 10px monospace'; ctx.textAlign = 'center';
+          ctx.fillText('~ MENU ~', 358, 32);
+          ctx.font = '9px monospace'; ctx.textAlign = 'left';
+          [['LATTE', '3'], ['ESPRESSO', '2'], ['COLD BREW', '4'], ['BUG FIX', '∞']].forEach(([item, price], i) => {
+            ctx.fillText(item, 311, 47 + i * 11);
+            ctx.textAlign = 'right'; ctx.fillText(price + '☕', 406, 47 + i * 11); ctx.textAlign = 'left';
+          });
+
+          // Pendant lamps
+          [186, 262].forEach(lx => {
+            ctx.strokeStyle = '#2a1a10'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(lx, 0); ctx.lineTo(lx, 30); ctx.stroke();
+            ctx.fillStyle = '#5a3820';
+            ctx.beginPath(); ctx.moveTo(lx - 11, 40); ctx.lineTo(lx - 5, 30); ctx.lineTo(lx + 5, 30); ctx.lineTo(lx + 11, 40); ctx.closePath(); ctx.fill();
+            ctx.fillStyle = '#ffd08a'; ctx.fillRect(lx - 4, 40, 8, 3);
+            const lg = ctx.createRadialGradient(lx, 44, 2, lx, 44, 80);
+            lg.addColorStop(0, 'rgba(255,170,80,0.22)');
+            lg.addColorStop(1, 'rgba(255,170,80,0)');
+            ctx.fillStyle = lg; ctx.fillRect(lx - 85, 20, 170, 140);
+          });
+
+          // Café table with steaming mug + laptop (right foreground)
+          const tx = 336;
+          ctx.fillStyle = '#4a2c18'; ctx.fillRect(tx - 34, floorY - 34, 68, 5);
+          ctx.fillStyle = '#2b190f'; ctx.fillRect(tx - 3, floorY - 29, 6, 29);
+          ctx.fillRect(tx - 14, floorY - 3, 28, 3);
+          ctx.fillStyle = '#e8dccb'; ctx.fillRect(tx + 12, floorY - 44, 10, 10);
+          ctx.strokeStyle = '#e8dccb'; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(tx + 23, floorY - 39, 3, -Math.PI / 2, Math.PI / 2); ctx.stroke();
+          drawSteam(ctx, tx + 17, floorY - 47);
+          ctx.fillStyle = '#2a2a33'; ctx.fillRect(tx - 26, floorY - 36, 30, 2);
+          ctx.save(); ctx.translate(tx - 26, floorY - 36); ctx.rotate(-1.35);
+          ctx.fillStyle = '#2a2a33'; ctx.fillRect(0, 0, 22, 2);
+          ctx.restore();
+          ctx.fillStyle = 'rgba(120,200,255,0.18)'; ctx.fillRect(tx - 25, floorY - 57, 3, 20);
+
+          // Potted plant (left foreground)
+          ctx.fillStyle = '#5a3018'; ctx.fillRect(74, floorY - 18, 24, 18);
+          ctx.fillStyle = '#6b3a1e'; ctx.fillRect(72, floorY - 21, 28, 5);
+          [[86, floorY - 44, 12], [76, floorY - 34, 9], [96, floorY - 36, 10]].forEach(([fx, fy, fr]) => {
+            ctx.fillStyle = '#0f2412'; ctx.beginPath(); ctx.arc(fx, fy, fr, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#18381c'; ctx.beginPath(); ctx.arc(fx - 2, fy - 2, fr * 0.6, 0, Math.PI * 2); ctx.fill();
+          });
+        }
+
+        // ── Room: Neon Dojo (Lv 10) — the original DevGotchi scene ──────
+        function drawNeonDojoRoom(ctx, W, H, floorY) {
           // Background
           const bg = ctx.createLinearGradient(0, 0, 0, H);
           bg.addColorStop(0,   '#04040E');
@@ -5831,6 +6393,264 @@ class DeveloperPanel {
           ctx.font = '11px serif';
           ctx.textAlign = 'center';
           ['コ','ー','ド','は','武','道','だ'].forEach((ch, i) => ctx.fillText(ch, W - 17, 22 + i * 16));
+        }
+
+        // ── Room: Neon Tokyo Office (Lv 20) ─────────────────────────────
+        function drawTokyoOfficeRoom(ctx, W, H, floorY) {
+          const rand = seededRandom(20);
+          // Floor-to-ceiling window: dusk-to-night sky
+          const sky = ctx.createLinearGradient(0, 0, 0, floorY);
+          sky.addColorStop(0, '#06041a');
+          sky.addColorStop(0.65, '#2a0d4a');
+          sky.addColorStop(1, '#5a1450');
+          ctx.fillStyle = sky; ctx.fillRect(0, 0, W, floorY);
+
+          // Far skyline
+          for (let x = 0; x < W; x += 12 + Math.floor(rand() * 10)) {
+            const bh = 30 + rand() * 50;
+            ctx.fillStyle = '#1a0a33'; ctx.fillRect(x, floorY - bh, 14, bh);
+          }
+          // Tokyo Tower silhouette
+          const tw = 140;
+          ctx.strokeStyle = 'rgba(255,70,60,0.75)'; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.moveTo(tw - 16, floorY); ctx.lineTo(tw, floorY - 108); ctx.lineTo(tw + 16, floorY); ctx.stroke();
+          [[floorY - 40, 11], [floorY - 72, 6]].forEach(([y, hw]) => {
+            ctx.beginPath(); ctx.moveTo(tw - hw, y); ctx.lineTo(tw + hw, y); ctx.stroke();
+          });
+          ctx.fillStyle = 'rgba(255,90,80,0.9)'; ctx.fillRect(tw - 1, floorY - 114, 2, 6);
+          // Near skyline with lit windows + neon signs
+          const neon = ['#00e5ff', '#ff4f9a', '#ffd740'];
+          for (let x = -4; x < W; ) {
+            const bw = 22 + Math.floor(rand() * 26), bh = 22 + rand() * 40;
+            ctx.fillStyle = '#0c0620'; ctx.fillRect(x, floorY - bh, bw, bh);
+            for (let wy2 = floorY - bh + 5; wy2 < floorY - 4; wy2 += 6) {
+              for (let wx2 = x + 3; wx2 < x + bw - 3; wx2 += 5) {
+                if (rand() < 0.35) {
+                  ctx.fillStyle = rand() < 0.7 ? 'rgba(255,215,140,0.55)' : 'rgba(0,229,255,0.45)';
+                  ctx.fillRect(wx2, wy2, 2, 2);
+                }
+              }
+            }
+            if (rand() < 0.35) {
+              const c = neon[Math.floor(rand() * neon.length)];
+              ctx.save(); ctx.shadowColor = c; ctx.shadowBlur = 8;
+              ctx.fillStyle = c; ctx.fillRect(x + bw / 2 - 2, floorY - bh - 14, 4, 12);
+              ctx.restore();
+            }
+            x += bw + 2;
+          }
+          // Window mullions + reflection sheen
+          ctx.fillStyle = '#0a0a18';
+          for (let x = 0; x <= W; x += 110) ctx.fillRect(x - 2, 0, 4, floorY);
+          ctx.fillRect(0, 0, W, 5);
+          ctx.fillStyle = 'rgba(255,255,255,0.03)';
+          ctx.beginPath(); ctx.moveTo(130, 0); ctx.lineTo(170, 0); ctx.lineTo(110, floorY); ctx.lineTo(70, floorY); ctx.closePath(); ctx.fill();
+
+          // Glossy floor reflecting the city
+          const fl = ctx.createLinearGradient(0, floorY, 0, H);
+          fl.addColorStop(0, '#2a0c3a'); fl.addColorStop(1, '#08040f');
+          ctx.fillStyle = fl; ctx.fillRect(0, floorY, W, H - floorY);
+          ctx.fillStyle = 'rgba(0,229,255,0.07)';
+          for (let x = 8; x < W; x += 37) ctx.fillRect(x, floorY + 4, 3, H - floorY);
+          ctx.fillStyle = 'rgba(255,79,154,0.08)';
+          for (let x = 26; x < W; x += 53) ctx.fillRect(x, floorY + 6, 2, H - floorY);
+
+          // Vending machine (left)
+          const vx = 22, vy = floorY - 92;
+          ctx.fillStyle = '#c8ccd8'; ctx.fillRect(vx, vy, 46, 92);
+          ctx.fillStyle = '#11131f'; ctx.fillRect(vx + 4, vy + 6, 38, 54);
+          ctx.save(); ctx.shadowColor = '#00e5ff'; ctx.shadowBlur = 10;
+          ctx.fillStyle = 'rgba(0,229,255,0.2)'; ctx.fillRect(vx + 4, vy + 6, 38, 54);
+          ctx.restore();
+          const cans = ['#ff4f9a', '#ffd740', '#00e5ff', '#69f0ae', '#ff7043'];
+          for (let r = 0; r < 4; r++) for (let c = 0; c < 5; c++) {
+            ctx.fillStyle = cans[(r + c) % cans.length];
+            ctx.fillRect(vx + 7 + c * 7, vy + 10 + r * 13, 4, 8);
+          }
+          ctx.fillStyle = '#11131f'; ctx.fillRect(vx + 8, vy + 70, 30, 10);
+          ctx.fillStyle = '#ff4f9a'; ctx.fillRect(vx + 36, vy + 64, 4, 3);
+
+          // Desk with dual monitors (right)
+          const dx = 300, dy = floorY - 40;
+          ctx.fillStyle = '#1c1c2c'; ctx.fillRect(dx, dy, 120, 5);
+          ctx.fillStyle = '#121220'; ctx.fillRect(dx + 6, dy + 5, 4, 35); ctx.fillRect(dx + 110, dy + 5, 4, 35);
+          [[dx + 12, -0.08], [dx + 64, 0.08]].forEach(([mx]) => {
+            ctx.fillStyle = '#0b0f16'; roundRect(ctx, mx, dy - 40, 46, 32, 2); ctx.fill();
+            ctx.strokeStyle = 'rgba(255,79,154,0.6)'; ctx.lineWidth = 1; ctx.stroke();
+            ctx.fillStyle = 'rgba(0,229,255,0.4)';
+            [30, 20, 36, 14].forEach((len, i) => ctx.fillRect(mx + 4, dy - 35 + i * 6, len, 2));
+            ctx.fillStyle = '#1c1c2c'; ctx.fillRect(mx + 21, dy - 8, 4, 8);
+          });
+          const mg = ctx.createRadialGradient(dx + 60, dy - 24, 4, dx + 60, dy - 24, 70);
+          mg.addColorStop(0, 'rgba(0,229,255,0.12)'); mg.addColorStop(1, 'rgba(0,229,255,0)');
+          ctx.fillStyle = mg; ctx.fillRect(dx - 20, dy - 90, 160, 130);
+          // Desk mug
+          ctx.fillStyle = '#ff4f9a'; ctx.fillRect(dx + 102, dy - 9, 7, 9);
+          drawSteam(ctx, dx + 105, dy - 11);
+        }
+
+        // ── Room: Orbital Space Station (Lv 35) ─────────────────────────
+        function drawSpaceStationRoom(ctx, W, H, floorY) {
+          const rand = seededRandom(35);
+          // Hull panels
+          const bg = ctx.createLinearGradient(0, 0, 0, floorY);
+          bg.addColorStop(0, '#0c111c'); bg.addColorStop(1, '#151d2c');
+          ctx.fillStyle = bg; ctx.fillRect(0, 0, W, floorY);
+          ctx.strokeStyle = '#1e283a'; ctx.lineWidth = 1;
+          for (let x = 0; x < W; x += 55) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, floorY); ctx.stroke(); }
+          for (let y = 0; y < floorY; y += 46) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+          ctx.fillStyle = '#28344a';
+          for (let x = 0; x < W; x += 55) for (let y = 0; y < floorY; y += 46) {
+            ctx.fillRect(x + 3, y + 3, 2, 2); ctx.fillRect(x + 50, y + 3, 2, 2);
+          }
+
+          // Porthole with starfield + Earthrise (behind the character)
+          const px = W / 2, py = 62, pr = 50;
+          ctx.save();
+          ctx.beginPath(); ctx.arc(px, py, pr, 0, Math.PI * 2); ctx.clip();
+          ctx.fillStyle = '#01010a'; ctx.fillRect(px - pr, py - pr, pr * 2, pr * 2);
+          for (let i = 0; i < 60; i++) {
+            const a = 0.3 + rand() * 0.7;
+            ctx.fillStyle = 'rgba(255,255,255,' + a.toFixed(2) + ')';
+            ctx.fillRect(px - pr + rand() * pr * 2, py - pr + rand() * pr * 2, rand() < 0.15 ? 2 : 1, 1);
+          }
+          const ex = px + 18, ey = py + 92, er = 78;
+          const atm = ctx.createRadialGradient(ex, ey, er - 4, ex, ey, er + 14);
+          atm.addColorStop(0, 'rgba(90,180,255,0.6)'); atm.addColorStop(1, 'rgba(90,180,255,0)');
+          ctx.fillStyle = atm; ctx.beginPath(); ctx.arc(ex, ey, er + 14, 0, Math.PI * 2); ctx.fill();
+          const earth = ctx.createRadialGradient(ex - 30, ey - 50, 10, ex, ey, er);
+          earth.addColorStop(0, '#3b8fe0'); earth.addColorStop(1, '#0b2a5a');
+          ctx.fillStyle = earth; ctx.beginPath(); ctx.arc(ex, ey, er, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = 'rgba(70,150,80,0.75)';
+          [[ex - 40, ey - 66, 16, 6], [ex - 6, ey - 74, 22, 7], [ex + 26, ey - 62, 12, 5]].forEach(([x, y, w, h]) => {
+            ctx.beginPath(); ctx.ellipse(x, y, w, h, -0.2, 0, Math.PI * 2); ctx.fill();
+          });
+          ctx.fillStyle = 'rgba(255,255,255,0.35)';
+          ctx.beginPath(); ctx.ellipse(ex - 20, ey - 71, 18, 3, -0.1, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+          ctx.strokeStyle = '#3a475f'; ctx.lineWidth = 7;
+          ctx.beginPath(); ctx.arc(px, py, pr + 3, 0, Math.PI * 2); ctx.stroke();
+          ctx.strokeStyle = '#56657f'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(px, py, pr + 6, 0, Math.PI * 2); ctx.stroke();
+          ctx.fillStyle = '#7a8aa6';
+          for (let i = 0; i < 12; i++) {
+            const a = (i / 12) * Math.PI * 2;
+            ctx.fillRect(px + Math.cos(a) * (pr + 3) - 1, py + Math.sin(a) * (pr + 3) - 1, 2, 2);
+          }
+
+          // Control console with radar (left)
+          const cx0 = 14, cy0 = floorY - 58;
+          ctx.fillStyle = '#1e2738'; ctx.fillRect(cx0, cy0, 108, 58);
+          ctx.fillStyle = '#2a3549'; ctx.fillRect(cx0 - 2, cy0 - 4, 112, 6);
+          ctx.fillStyle = '#04110c'; ctx.fillRect(cx0 + 8, cy0 + 8, 40, 32);
+          ctx.strokeStyle = 'rgba(105,240,174,0.55)'; ctx.lineWidth = 1;
+          [6, 12].forEach(r => { ctx.beginPath(); ctx.arc(cx0 + 28, cy0 + 24, r, 0, Math.PI * 2); ctx.stroke(); });
+          ctx.beginPath(); ctx.moveTo(cx0 + 28, cy0 + 24); ctx.lineTo(cx0 + 38, cy0 + 16); ctx.stroke();
+          ctx.fillStyle = '#69f0ae'; ctx.fillRect(cx0 + 20, cy0 + 28, 2, 2);
+          const leds = ['#ff1744', '#ffd740', '#69f0ae', '#00e5ff'];
+          for (let r = 0; r < 3; r++) for (let c = 0; c < 6; c++) {
+            if (rand() < 0.3) continue;
+            ctx.fillStyle = leds[Math.floor(rand() * leds.length)];
+            ctx.fillRect(cx0 + 56 + c * 8, cy0 + 10 + r * 9, 4, 3);
+          }
+          ctx.fillStyle = '#0b2030'; ctx.fillRect(cx0 + 8, cy0 + 44, 92, 6);
+          ctx.fillStyle = 'rgba(0,229,255,0.6)'; ctx.fillRect(cx0 + 8, cy0 + 44, 58, 6);
+
+          // Hydroponics pod (right)
+          const hx = 350, hy = 22;
+          ctx.fillStyle = '#1e2738'; ctx.fillRect(hx - 4, hy - 4, 68, 100);
+          ctx.fillStyle = 'rgba(105,240,174,0.08)'; ctx.fillRect(hx, hy, 60, 92);
+          ctx.save(); ctx.shadowColor = '#e040fb'; ctx.shadowBlur = 8;
+          ctx.fillStyle = 'rgba(224,64,251,0.8)'; ctx.fillRect(hx, hy, 60, 2);
+          ctx.restore();
+          [hy + 34, hy + 78].forEach(sy => {
+            ctx.fillStyle = '#2a3549'; ctx.fillRect(hx, sy, 60, 3);
+            for (let k = 0; k < 5; k++) {
+              ctx.fillStyle = k % 2 ? '#2e8b47' : '#3fae5c';
+              ctx.beginPath(); ctx.arc(hx + 7 + k * 11.5, sy - 6, 5, 0, Math.PI * 2); ctx.fill();
+            }
+          });
+
+          // Floating zero-g coffee mug
+          ctx.save(); ctx.translate(300, 46); ctx.rotate(0.4);
+          ctx.fillStyle = '#e8dccb'; ctx.fillRect(-5, -6, 10, 12);
+          ctx.strokeStyle = '#e8dccb'; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(6, 0, 3, -Math.PI / 2, Math.PI / 2); ctx.stroke();
+          ctx.restore();
+          ctx.fillStyle = 'rgba(120,70,40,0.8)';
+          [[290, 36], [286, 30], [293, 28]].forEach(([bx, by], i) => {
+            ctx.beginPath(); ctx.arc(bx, by, 1.5 - i * 0.3, 0, Math.PI * 2); ctx.fill();
+          });
+
+          // Metal deck grating + hazard stripe
+          ctx.fillStyle = '#10151f'; ctx.fillRect(0, floorY, W, H - floorY);
+          ctx.strokeStyle = '#1c2433'; ctx.lineWidth = 1;
+          for (let x = 0; x < W; x += 8) { ctx.beginPath(); ctx.moveTo(x, floorY + 6); ctx.lineTo(x, H); ctx.stroke(); }
+          for (let y = floorY + 14; y < H; y += 14) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+          for (let x = 0; x < W; x += 14) {
+            ctx.fillStyle = (x / 14) % 2 ? '#141414' : '#c9a227';
+            ctx.beginPath();
+            ctx.moveTo(x, floorY); ctx.lineTo(x + 7, floorY); ctx.lineTo(x + 14, floorY + 5); ctx.lineTo(x + 7, floorY + 5);
+            ctx.closePath(); ctx.fill();
+          }
+        }
+
+        const ROOM_PAINTERS = {
+          coffee_shop: drawCoffeeShopRoom,
+          neon_dojo: drawNeonDojoRoom,
+          tokyo_office: drawTokyoOfficeRoom,
+          space_station: drawSpaceStationRoom
+        };
+
+        // Neglect overlay for an active Rescue Mission: cobwebs in the top
+        // corners, a dusty haze and floating motes, all scaled by dust (0-1).
+        function drawNeglectOverlay(ctx, W, H, dust) {
+          if (!(dust > 0)) return;
+          ctx.save();
+          ctx.fillStyle = 'rgba(70,70,80,' + (0.32 * dust).toFixed(3) + ')';
+          ctx.fillRect(0, 0, W, H);
+          const web = (cx, cy, dirX, size) => {
+            ctx.strokeStyle = 'rgba(220,220,230,' + (0.55 * dust).toFixed(3) + ')';
+            ctx.lineWidth = 1;
+            const spokes = 6;
+            for (let i = 0; i <= spokes; i++) {
+              const a = (i / spokes) * (Math.PI / 2);
+              ctx.beginPath(); ctx.moveTo(cx, cy);
+              ctx.lineTo(cx + dirX * Math.cos(a) * size, cy + Math.sin(a) * size);
+              ctx.stroke();
+            }
+            for (let r = size * 0.25; r <= size; r += size * 0.22) {
+              ctx.beginPath();
+              for (let i = 0; i <= spokes; i++) {
+                const a = (i / spokes) * (Math.PI / 2);
+                const sag = (i % 2 ? 0.92 : 1);
+                const x = cx + dirX * Math.cos(a) * r * sag, y = cy + Math.sin(a) * r * sag;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+              }
+              ctx.stroke();
+            }
+          };
+          const size = 22 + 38 * dust;
+          web(0, 0, 1, size);
+          web(W, 0, -1, size * 0.8);
+          const rand = seededRandom(404);
+          ctx.fillStyle = 'rgba(230,225,210,' + (0.5 * dust).toFixed(3) + ')';
+          const motes = Math.round(40 * dust);
+          for (let i = 0; i < motes; i++) ctx.fillRect(Math.floor(rand() * W), Math.floor(rand() * H), 1, 1);
+          ctx.restore();
+        }
+
+        function drawScene(canvas, mood, characterClass, roomId, dust) {
+          const ctx = canvas.getContext('2d');
+          ctx.imageSmoothingEnabled = false;
+          const W = canvas.width, H = canvas.height;
+          const theme = CLASS_THEME[characterClass] || DEFAULT_CLASS_THEME;
+          const floorY = 148;
+
+          ctx.save();
+          (ROOM_PAINTERS[roomId] || drawCoffeeShopRoom)(ctx, W, H, floorY);
+          ctx.restore();
+          ctx.textAlign = 'left';
 
           // Character
           drawCharacter(ctx, W / 2, floorY, mood, characterClass);
@@ -5841,12 +6661,14 @@ class DeveloperPanel {
           gg.addColorStop(1, 'rgba(' + theme.glow + ',0)');
           ctx.fillStyle = gg;
           ctx.fillRect(W/2 - 80, floorY - 8, 160, 75);
+
+          drawNeglectOverlay(ctx, W, H, dust);
         }
 
         // Initial draw (mood unknown yet, use neutral)
         (function() {
           const canvas = document.getElementById('sceneCanvas');
-          if (canvas) drawScene(canvas, 'neutral');
+          if (canvas) drawScene(canvas, 'neutral', null, getActiveRoom(null).id);
         })();
         // ── END SCENE CANVAS ──────────────────────────────────────────────
 
@@ -6551,18 +7373,71 @@ class DeveloperPanel {
           }).join('');
         }
 
-        // ── CYBERPUNK MUSIC SYNTHESIZER ──────────────────────────────────
+        // ── ROOM MUSIC SYNTHESIZER ────────────────────────────────────────
         let audioCtx = null;
         let musicPlaying = false;
         let masterGain = null;
         let scheduledNodes = [];
         let sequencerTimeout = null;
 
-        // Pentatonic minor scale (A) — very cyberpunk
-        const SCALE = [110, 130.81, 146.83, 164.81, 196, 220, 261.63, 293.66, 329.63, 392, 440];
-        const BASS  = [55, 65.41, 73.42, 82.41, 98, 110];
-        const BPM   = 118;
-        const STEP  = 60 / BPM / 2; // eighth note
+        // Each room has its own soundtrack. A profile is read fresh at the
+        // start of every bar, so switching rooms (or unlocking one in auto
+        // mode) crossfades into the new track at the next bar line. Boss
+        // intensity layers on top of whichever profile is playing.
+        //   scale/bass: note pools; *Seq index into them
+        //   kicks: step indices (of 16 eighth-note steps) that get a kick
+        //   hatGain/offHatGain: on-/off-beat hi-hat level (0 = no hats)
+        //   swing: fraction of a step to delay off-beats by (lo-fi shuffle)
+        //   crackle: vinyl-tick density per bar (0 = clean)
+        const ROOM_MUSIC = {
+          // Lo-fi café: D dorian, triangle keys, swung soft drums, vinyl crackle
+          coffee_shop: {
+            bpm: 80, swing: 0.22, crackle: 7,
+            scale: [146.83, 174.61, 196, 220, 261.63, 293.66, 329.63, 349.23, 392, 440, 523.25],
+            bass: [73.42, 87.31, 98, 110, 130.81, 146.83],
+            bassSeq: [0, 0, 2, 3, 1, 1, 4, 3], bassEvery: 4, bassLen: 3.6, bassWave: 'triangle', bassGain: 0.26, bassFilter: 500,
+            arpSeq: [5, 7, 9, 6, 8, 5, 4, 6], arpEvery: 2, arpLen: 1.4, arpWave: 'triangle', arpGain: 0.06, arpFilter: 1600,
+            padNotes: [146.83, 174.61, 220, 261.63, 329.63], padWave: 'triangle', padGain: 0.045, padFilter: 1100,
+            lead: [8, 7, 5, 6], leadEvery: 4, leadWave: 'sine', leadGain: 0.05, leadFilter: 2000,
+            kicks: [0, 5, 8], hatGain: 0.06, offHatGain: 0.03
+          },
+          // The original DevGotchi track: A minor pentatonic cyberpunk
+          neon_dojo: {
+            bpm: 118, swing: 0, crackle: 0,
+            scale: [110, 130.81, 146.83, 164.81, 196, 220, 261.63, 293.66, 329.63, 392, 440],
+            bass: [55, 65.41, 73.42, 82.41, 98, 110],
+            bassSeq: [0, 0, 4, 2, 0, 0, 3, 4], bassEvery: 2, bassLen: 2.2, bassWave: 'sawtooth', bassGain: 0.22, bassFilter: 320,
+            arpSeq: [4, 6, 7, 9, 7, 6, 4, 2, 4, 6, 8, 9, 8, 7, 6, 4], arpEvery: 1, arpLen: 0.6, arpWave: 'square', arpGain: 0.07, arpFilter: 2200,
+            padNotes: [110, 130.81, 164.81, 220], padWave: 'sawtooth', padGain: 0.055, padFilter: 900,
+            lead: [6, 8, 9, 7], leadEvery: 4, leadWave: 'sawtooth', leadGain: 0.09, leadFilter: 3000,
+            kicks: [0, 4, 8, 12], hatGain: 0.18, offHatGain: 0.08
+          },
+          // City-pop synthwave: E minor, octave-pumping bass, four-on-the-floor
+          tokyo_office: {
+            bpm: 124, swing: 0, crackle: 0,
+            scale: [164.81, 196, 220, 246.94, 293.66, 329.63, 392, 440, 493.88, 587.33, 659.25],
+            bass: [41.2, 49, 55, 61.74, 73.42, 82.41],
+            bassSeq: [0, 5, 0, 5, 1, 5, 2, 3], bassEvery: 1, bassLen: 0.9, bassWave: 'sawtooth', bassGain: 0.2, bassFilter: 600,
+            arpSeq: [0, 2, 4, 5, 7, 5, 4, 2, 1, 3, 5, 6, 8, 6, 5, 3], arpEvery: 1, arpLen: 0.5, arpWave: 'sawtooth', arpGain: 0.05, arpFilter: 3000,
+            padNotes: [164.81, 196, 246.94, 293.66], padWave: 'sawtooth', padGain: 0.05, padFilter: 1400,
+            lead: [9, 8, 6, 7], leadEvery: 2, leadWave: 'square', leadGain: 0.07, leadFilter: 2600,
+            kicks: [0, 2, 4, 6, 8, 10, 12, 14], hatGain: 0.08, offHatGain: 0.16
+          },
+          // Ambient orbit: C lydian, sine pads, sonar pings, no drums
+          space_station: {
+            bpm: 70, swing: 0, crackle: 0,
+            scale: [261.63, 293.66, 329.63, 369.99, 392, 440, 493.88, 523.25, 587.33, 659.25, 739.99],
+            bass: [65.41, 73.42, 82.41, 98, 110, 130.81],
+            bassSeq: [0, 0, 4, 3], bassEvery: 8, bassLen: 7.5, bassWave: 'sine', bassGain: 0.24, bassFilter: 400,
+            arpSeq: [7, 10, 9, 5, 8, 6, 3, 4], arpEvery: 4, arpLen: 3.5, arpWave: 'sine', arpGain: 0.05, arpFilter: 4000,
+            padNotes: [130.81, 164.81, 196, 246.94, 369.99], padWave: 'sine', padGain: 0.07, padFilter: 1200,
+            lead: [10, 7, 9, 3], leadEvery: 4, leadWave: 'sine', leadGain: 0.035, leadFilter: 5000,
+            kicks: [], hatGain: 0, offHatGain: 0
+          }
+        };
+        function getMusicProfile() {
+          return ROOM_MUSIC[getActiveRoom(currentDev).id] || ROOM_MUSIC.neon_dojo;
+        }
 
         function initAudio() {
           if (audioCtx) return;
@@ -6632,7 +7507,7 @@ class DeveloperPanel {
         }
 
         function playHat(startTime, vol) {
-          if (!audioCtx || !musicPlaying) return;
+          if (!audioCtx || !musicPlaying || vol <= 0.001) return;
           const buf  = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.05, audioCtx.sampleRate);
           const data = buf.getChannelData(0);
           for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
@@ -6651,12 +7526,6 @@ class DeveloperPanel {
           scheduledNodes.push(src);
         }
 
-        // Bass sequence: root, fifth, flat-7, root octave up
-        const bassSeq   = [0, 0, 4, 2, 0, 0, 3, 4];
-        // Arp sequence: pentatonic run
-        const arpSeq    = [4, 6, 7, 9, 7, 6, 4, 2, 4, 6, 8, 9, 8, 7, 6, 4];
-        // Pad chord intervals (A minor)
-        const padNotes  = [110, 130.81, 164.81, 220]; // A2 chord
         let   arpStep   = 0;
         let   bassStep  = 0;
         let   barCount  = 0;
@@ -6673,59 +7542,70 @@ class DeveloperPanel {
           return Math.min(1, errors / 5);
         }
 
+        // Schedules one bar of the active room's track; returns the bar's
+        // length in seconds (tempo is per-room, so it can change bar to bar).
         function scheduleBar(barStart) {
-          if (!musicPlaying) return;
+          const M = getMusicProfile();
+          const STEP = 60 / M.bpm / 2; // eighth note
           const stepsPerBar = 16;
+          if (!musicPlaying) return STEP * stepsPerBar;
           const intensity = getBossIntensity();
 
           for (let s = 0; s < stepsPerBar; s++) {
-            const t = barStart + s * STEP;
+            const t = barStart + s * STEP + (s % 2 === 1 ? M.swing * STEP : 0);
 
-            // ── Kick: 1, 3, 5, 7 always; a growing Bug Boss adds urgent
+            // ── Kick: per-room pattern; a growing Bug Boss adds urgent
             // double-time kicks on the off-beats too, past the halfway point.
-            if (s === 0 || s === 4 || s === 8 || s === 12) playKick(t);
-            if (intensity > 0.5 && (s === 2 || s === 6 || s === 10 || s === 14)) playKick(t);
-            // ── Hi-hat: every even eighth, louder as the boss grows
-            if (s % 2 === 0) playHat(t, 0.18 + intensity * 0.12);
-            if (s % 2 === 1) playHat(t, 0.08 + intensity * 0.1);
+            if (M.kicks.indexOf(s) !== -1) playKick(t);
+            if (intensity > 0.5 && (s === 2 || s === 6 || s === 10 || s === 14) && M.kicks.indexOf(s) === -1) playKick(t);
+            // ── Hi-hat: louder as the boss grows (rooms with no hats only
+            // get them once a boss shows up)
+            if (s % 2 === 0) playHat(t, M.hatGain + intensity * 0.12);
+            if (s % 2 === 1) playHat(t, M.offHatGain + intensity * 0.1);
 
-            // ── Bass: every 2 steps, brighter + louder under a growing boss
-            if (s % 2 === 0) {
-              const bIdx = bassSeq[(bassStep++) % bassSeq.length];
-              playNote(BASS[bIdx], t, STEP * 2.2, 'sawtooth', 0.22 + intensity * 0.1, 320 + intensity * 500, 0);
+            // ── Bass: brighter + louder under a growing boss
+            if (s % M.bassEvery === 0) {
+              const bIdx = M.bassSeq[(bassStep++) % M.bassSeq.length];
+              playNote(M.bass[bIdx], t, STEP * M.bassLen, M.bassWave, M.bassGain + intensity * 0.1, M.bassFilter + intensity * 500, 0);
             }
 
-            // ── Arp: every step, brighter with the boss; past the halfway
-            // point it doubles into urgent 16th-note fills
-            const aIdx = arpSeq[(arpStep++) % arpSeq.length];
-            playNote(SCALE[aIdx], t, STEP * 0.6, 'square', 0.07 + intensity * 0.05, 2200 + intensity * 1500, (s % 4 < 2) ? -0.3 : 0.3);
+            // ── Arp: brighter with the boss; past the halfway point it
+            // doubles into urgent 16th-note fills
+            if (s % M.arpEvery === 0) {
+              const aIdx = M.arpSeq[(arpStep++) % M.arpSeq.length];
+              playNote(M.scale[aIdx], t, STEP * M.arpLen, M.arpWave, M.arpGain + intensity * 0.05, M.arpFilter + intensity * 1500, (s % 4 < 2) ? -0.3 : 0.3);
+            }
             if (intensity > 0.6) {
-              const aIdx2 = arpSeq[(arpStep++) % arpSeq.length];
-              playNote(SCALE[aIdx2] * 2, t + STEP * 0.5, STEP * 0.3, 'square', 0.05 * intensity, 3200, (s % 4 < 2) ? 0.3 : -0.3);
+              const aIdx2 = M.arpSeq[(arpStep++) % M.arpSeq.length];
+              playNote(M.scale[aIdx2] * 2, t + STEP * 0.5, STEP * 0.3, 'square', 0.05 * intensity, 3200, (s % 4 < 2) ? 0.3 : -0.3);
             }
           }
 
-          // ── Pad chord: whole bar, swells every 2 bars — brighter/tenser as the boss grows
+          // ── Pad chord: two bars long, swells every 2 bars — brighter/tenser as the boss grows
           if (barCount % 2 === 0) {
-            padNotes.forEach((freq, i) => {
-              const panVal = [-0.5, -0.2, 0.2, 0.5][i];
-              playNote(freq, barStart, STEP * stepsPerBar * 2, 'sawtooth', 0.055 + intensity * 0.03, 900 + intensity * 900, panVal);
+            M.padNotes.forEach((freq, i) => {
+              const panVal = M.padNotes.length > 1 ? -0.5 + i / (M.padNotes.length - 1) : 0;
+              playNote(freq, barStart, STEP * stepsPerBar * 2, M.padWave, M.padGain + intensity * 0.03, M.padFilter + intensity * 900, panVal);
             });
           }
 
-          // ── Synth lead: sparse, every 4 bars
-          if (barCount % 4 === 0) {
-            const lead = [SCALE[6], SCALE[8], SCALE[9], SCALE[7]];
-            lead.forEach((f, i) => {
-              playNote(f * 2, barStart + i * STEP * 4, STEP * 3, 'sawtooth', 0.09 + intensity * 0.05, 3000, 0.1);
+          // ── Synth lead: sparse, every few bars
+          if (barCount % M.leadEvery === 0) {
+            M.lead.forEach((idx, i) => {
+              playNote(M.scale[idx] * 2, barStart + i * STEP * 4, STEP * 3, M.leadWave, M.leadGain + intensity * 0.05, M.leadFilter, 0.1);
             });
+          }
+
+          // ── Vinyl crackle (lo-fi rooms): a few quiet random ticks per bar
+          for (let c = 0; c < M.crackle; c++) {
+            playHat(barStart + Math.random() * STEP * stepsPerBar, 0.02 + Math.random() * 0.03);
           }
 
           // ── Boss alarm: a low pulsing siren once the Bug Boss is past 80%
           // HP — the "whoa, it noticed" moment.
           if (intensity > 0.8) {
-            playNote(BASS[0] / 2, barStart, STEP * 4, 'sawtooth', 0.05 + intensity * 0.06, 200, 0);
-            playNote(BASS[0] / 2, barStart + STEP * 8, STEP * 4, 'sawtooth', 0.05 + intensity * 0.06, 200, 0);
+            playNote(M.bass[0] / 2, barStart, STEP * 4, 'sawtooth', 0.05 + intensity * 0.06, 200, 0);
+            playNote(M.bass[0] / 2, barStart + STEP * 8, STEP * 4, 'sawtooth', 0.05 + intensity * 0.06, 200, 0);
           }
 
           barCount++;
@@ -6733,16 +7613,15 @@ class DeveloperPanel {
           scheduledNodes = scheduledNodes.filter(n => {
             try { return n.context && n.context.state !== 'closed'; } catch(e) { return false; }
           });
+          return STEP * stepsPerBar;
         }
 
         let nextBarTime = 0;
         function runSequencer() {
           if (!musicPlaying || !audioCtx) return;
-          const barDuration = STEP * 16;
           const lookahead   = 0.2; // seconds ahead
           while (nextBarTime < audioCtx.currentTime + lookahead) {
-            scheduleBar(nextBarTime);
-            nextBarTime += barDuration;
+            nextBarTime += scheduleBar(nextBarTime);
           }
           sequencerTimeout = setTimeout(runSequencer, 80);
         }
@@ -6784,6 +7663,148 @@ class DeveloperPanel {
           }
         }
         // ── END MUSIC ─────────────────────────────────────────────────────
+
+        // ── 8-BIT SOUND EFFECTS ───────────────────────────────────────────
+        // Synthesised the same way as the music (no audio files), but on
+        // their own gain node so they play whether music is on or off.
+        // Triggered by diffing consecutive 'update' snapshots rather than by
+        // per-event messages: every reward path (saves, commits, bosses,
+        // mini-games, quests) already ends in an update, so one diff covers
+        // them all with no extra wiring on the extension side.
+        let sfxGain = null;
+
+        function getSfxMode() {
+          return (currentSettings && currentSettings.soundEffects) || 'all';
+        }
+
+        // Returns a running AudioContext, or null if autoplay policy is still
+        // blocking it. A suspended context freezes currentTime, so anything
+        // scheduled on it would all fire at once later. Skipping beats a
+        // burst of stale chimes.
+        function getSfxContext() {
+          initAudio();
+          if (!sfxGain) {
+            sfxGain = audioCtx.createGain();
+            sfxGain.gain.value = 2.0; // per-tone levels are small; this keeps SFX audible over the music
+            sfxGain.connect(audioCtx.destination);
+          }
+          if (audioCtx.state === 'suspended') { audioCtx.resume(); return null; }
+          return audioCtx;
+        }
+        // Webviews may block audio until the user interacts, so the first
+        // click/keypress in the panel unlocks it for later (background) SFX.
+        ['pointerdown', 'keydown'].forEach(evt => document.addEventListener(evt, function unlockSfx() {
+          if (getSfxMode() !== 'off') getSfxContext();
+          document.removeEventListener(evt, unlockSfx);
+        }));
+
+        function sfxTone(ctx, freq, start, dur, type, vol, slideTo) {
+          const osc = ctx.createOscillator();
+          const g = ctx.createGain();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freq, start);
+          if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, start + dur);
+          g.gain.setValueAtTime(vol, start);
+          g.gain.setValueAtTime(vol, start + dur * 0.7);
+          g.gain.exponentialRampToValueAtTime(0.001, start + dur);
+          osc.connect(g); g.connect(sfxGain);
+          osc.start(start); osc.stop(start + dur + 0.02);
+        }
+
+        function sfxNoise(ctx, start, dur, vol, fromHz, toHz) {
+          const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+          const data = buf.getChannelData(0);
+          for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+          const src = ctx.createBufferSource(); src.buffer = buf;
+          const filt = ctx.createBiquadFilter(); filt.type = 'lowpass';
+          filt.frequency.setValueAtTime(fromHz, start);
+          filt.frequency.exponentialRampToValueAtTime(toHz, start + dur);
+          const g = ctx.createGain();
+          g.gain.setValueAtTime(vol, start);
+          g.gain.exponentialRampToValueAtTime(0.001, start + dur);
+          src.connect(filt); filt.connect(g); g.connect(sfxGain);
+          src.start(start);
+        }
+
+        // Each entry: (ctx, t0) => schedules the sound; dur is used to
+        // queue a second sound after it (e.g. level-up, then achievement).
+        const SFX = {
+          // Coin-style two-blip chime
+          xp: { dur: 0.12, play: (ctx, t) => {
+            sfxTone(ctx, 1318.5, t, 0.05, 'square', 0.05);
+            sfxTone(ctx, 1975.5, t + 0.05, 0.07, 'square', 0.05);
+          } },
+          // Shop "ka-ching"
+          purchase: { dur: 0.25, play: (ctx, t) => {
+            sfxTone(ctx, 987.8, t, 0.07, 'square', 0.06);
+            sfxTone(ctx, 1318.5, t + 0.07, 0.18, 'square', 0.06);
+          } },
+          // Rising C-major arpeggio into a held chord over a triangle bass
+          levelUp: { dur: 0.9, play: (ctx, t) => {
+            [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => sfxTone(ctx, f, t + i * 0.09, 0.09, 'square', 0.06));
+            sfxTone(ctx, 1046.5, t + 0.36, 0.5, 'square', 0.05);
+            sfxTone(ctx, 1318.5, t + 0.36, 0.5, 'square', 0.035);
+            sfxTone(ctx, 261.63, t + 0.36, 0.5, 'triangle', 0.12);
+          } },
+          // "Item get": quick run up, then a sparkly trill
+          achievement: { dur: 0.75, play: (ctx, t) => {
+            [783.99, 1046.5, 1318.5, 1568].forEach((f, i) => sfxTone(ctx, f, t + i * 0.06, 0.06, 'square', 0.05));
+            for (let i = 0; i < 6; i++) sfxTone(ctx, i % 2 ? 2093 : 1568, t + 0.24 + i * 0.07, 0.07, 'triangle', 0.07);
+          } },
+          // ··· ––– ··· in Morse: Rescue Mission started
+          distress: { dur: 1.9, play: (ctx, t) => {
+            const dot = 0.08, dash = 0.24, gap = 0.08;
+            let at = t;
+            [dot, dot, dot, 0, dash, dash, dash, 0, dot, dot, dot].forEach(len => {
+              if (!len) { at += gap * 2; return; }
+              sfxTone(ctx, 880, at, len, 'square', 0.05);
+              at += len + gap;
+            });
+          } },
+          // Rescue complete: the level-up arpeggio, then a resolving major-chord bloom
+          rescued: { dur: 1.3, play: (ctx, t) => {
+            [392, 523.25, 659.25, 783.99, 1046.5].forEach((f, i) => sfxTone(ctx, f, t + i * 0.08, 0.08, 'square', 0.06));
+            [523.25, 659.25, 783.99].forEach(f => sfxTone(ctx, f, t + 0.42, 0.8, 'triangle', 0.08));
+            sfxTone(ctx, 1046.5, t + 0.42, 0.8, 'square', 0.04);
+          } },
+          // Explosion sweep, then a short victory call
+          bossDefeated: { dur: 1.0, play: (ctx, t) => {
+            sfxNoise(ctx, t, 0.45, 0.25, 4000, 120);
+            sfxTone(ctx, 220, t, 0.4, 'square', 0.05, 55);
+            sfxTone(ctx, 783.99, t + 0.45, 0.1, 'square', 0.06);
+            sfxTone(ctx, 783.99, t + 0.57, 0.1, 'square', 0.06);
+            sfxTone(ctx, 1046.5, t + 0.69, 0.3, 'square', 0.06);
+          } }
+        };
+
+        function playSfx(names) {
+          if (getSfxMode() === 'off' || !names.length) return;
+          const ctx = getSfxContext();
+          if (!ctx) return;
+          let t = ctx.currentTime + 0.02;
+          names.forEach(name => { SFX[name].play(ctx, t); t += SFX[name].dur; });
+        }
+        function previewSfx() { playSfx(['levelUp']); }
+
+        // Works out which sounds an update deserves. At most two per update,
+        // most significant first, so a save that also levels you up and
+        // unlocks an achievement doesn't stack four sounds on top of each other.
+        function playSfxForUpdate(prev, dev) {
+          if (!prev || !dev) return; // first snapshot is the baseline
+          const len = a => (a && a.length) || 0;
+          const events = [];
+          if (dev.rescueMission && !prev.rescueMission) events.push('distress');
+          // Retiring a mission is silent; only a completion pays XP on the same update.
+          if (prev.rescueMission && !dev.rescueMission && (dev.totalXpEarned || 0) > (prev.totalXpEarned || 0)) events.push('rescued');
+          const prestiged = (dev.prestigeCount || 0) > (prev.prestigeCount || 0);
+          if (prestiged || dev.level > prev.level) events.push('levelUp');
+          if (len(dev.achievements) > len(prev.achievements)) events.push('achievement');
+          if ((dev.totalBossesDefeated || 0) > (prev.totalBossesDefeated || 0)) events.push('bossDefeated');
+          if (len(dev.inventory) > len(prev.inventory) || len(dev.skills) > len(prev.skills)) events.push('purchase');
+          if (!events.length && (dev.totalXpEarned || 0) > (prev.totalXpEarned || 0) && getSfxMode() === 'all') events.push('xp');
+          playSfx(events.slice(0, 2));
+        }
+        // ── END SOUND EFFECTS ─────────────────────────────────────────────
 
       </script>
     </body></html>`;

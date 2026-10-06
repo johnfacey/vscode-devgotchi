@@ -5,8 +5,26 @@ All notable changes to the "DevGotchi" extension will be documented in this file
 ## [Unreleased]
 
 ### Roadmap — ideas being considered, not yet built
-- **Raid Boss MVP**: show each teammate's bug-fix contribution during a Team Raid Boss fight, with an "MVP" tag for whoever cleared the most.
 - **Code Smell Boss, function-length mode**: the current boss only counts bloated *files* (300+ lines, free via `TextDocument.lineCount`); flagging individual 200-line *functions* needs real per-language parsing and is a bigger, separate build.
+
+## [2.9.0] - 2026-10-06
+
+### Added
+- **Unlockable Rooms**: the pixel-art scene now changes as you level up. ☕ Corner Coffee Shop (Lv 1) → ⛩️ Neon Dojo (Lv 10, the original scene) → 🌃 Neon Tokyo Office (Lv 20) → 🚀 Orbital Space Station (Lv 35). Each room has a matching procedural soundtrack (lo-fi, cyberpunk, city-pop synthwave, ambient), and Dynamic Boss Music layers on top of all of them. Auto mode (default) moves you in to each new room as it unlocks, with a level-up toast. Click the room badge on the scene to switch rooms, or pin one from the new Rooms section in the Shop. Unlocks are derived from level, so nothing new is stored beyond your room choice, and Prestiging never re-locks a room.
+- **Language Affinity**: every class now has a home-turf language set, and saving a file in one earns +50% save XP. 🔮 Backend Mage: Python, Go, Rust, Java, C#, SQL and friends. 🗡️ Frontend Rogue: TypeScript, JavaScript, HTML, CSS, Vue, Svelte. 🛡️ DevOps Paladin: shell, Dockerfile, YAML, Terraform, Nix, Makefile (the Paladin's first XP-side bonus). It uses VS Code's own language detection, with a filename fallback for infra files that show as plain text when the language extension isn't installed. Bonus-only, so off-affinity saves earn exactly what they did before. Affinity saves get a status-bar flash and a ✦ in the Activity Log, and every save log line now shows its language.
+- **8-bit Sound Effects**: synthesised chiptune SFX (no audio files): a coin chime for XP, a level-up fanfare, an achievement trill, a boss-defeat explosion and a shop ka-ching. Big moments first, at most two sounds per update. They play with or without music, on their own gain bus. New ⚙️ Settings option: All / Milestones only (no per-save chime) / Off, with a preview when you change it. Saving a file now refreshes the panel immediately instead of on the next 30s tick, so the XP bar and chime land the moment you save.
+- **Rescue Missions**: return after 3+ days of no editor activity (outside Vacation Mode) and your developer is "stranded". You get cobwebs and dust over the scene, an SOS sound, and a three-objective welcome-back quest (save 5 files, code 15 minutes, make 1 commit) whose progress visibly clears the dust. Completing it fully restores stats, pays +XP/☕ scaled by days away, recovers half the streak the absence broke, and unlocks 🛟 Welcome Home. Deliberately non-punishing: no stat penalty for triggering it, no failure state; unfinished missions quietly retire after 7 days. Absence is tracked by a new persisted last-activity timestamp, so it works whether VS Code was closed or just left open and idle.
+- **Raid Boss MVP** (from the roadmap): the Team Raid Boss card now shows each teammate's damage this fight (growth in their synced lifetime bug-fix count since the fight began; late joiners start from 0) with a 🏆 MVP tag on the leader, co-MVPs on a tie. Once the boss is cleared, the final board persists until the next fight and the clear toast and Activity Log line name the MVP. Derived entirely from the existing git-synced snapshots; no new sync mechanism.
+
+### Changed
+- **Your scene may move on update.** The starting scene is now the ☕ Corner Coffee Shop, and the original Neon Dojo unlocks at Level 10. Players below Level 10 will see the coffee shop, and players at 20+ / 35+ move straight into the Tokyo Office / Space Station (Auto mode). Pin any unlocked room from the Shop to choose your own.
+- **🎵 Cyberpunk Music is now 🎵 Room Music**: the soundtrack follows your current room. The Neon Dojo plays the original track unchanged.
+- **Class descriptions** in the class picker, Shop and status-bar tooltip now list each class's Language Affinity.
+- **Saving a file refreshes the panel immediately** (XP bar, quests, stats) instead of waiting for the next 30-second tick.
+- **Activity Log save lines** now include the file's language, e.g. `📝 File saved (python ✦)  +5 XP  +1 ☕`. Standup summaries still count them as saves.
+
+### Security
+- Teammate names and emails from `.devgotchi/team/*.json` are now HTML-escaped when read. The Team view renders them via `innerHTML`, so a crafted snapshot file committed to the repo could previously inject markup into a teammate's panel.
 
 ## [2.8.0] - 2026-09-25
 

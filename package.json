@@ -2,7 +2,7 @@
   "name": "vscode-devgotchi",
   "displayName": "DevGotchi — Gamify Coding: Pomodoro Timer, XP & Achievements",
   "description": "Turn VS Code into a cyberpunk RPG. Your living developer avatar tracks focus, energy & motivation in real time — earn XP for every save and commit, run Pomodoro focus sprints, battle real bosses tied to your repo state, and protect your streak. Free forever. No telemetry, no account.",
-  "version": "2.8.0",
+  "version": "2.9.0",
   "engines": {
     "vscode": "^1.80.0"
   },
