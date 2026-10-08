@@ -7,6 +7,11 @@ All notable changes to the "DevGotchi" extension will be documented in this file
 ### Roadmap — ideas being considered, not yet built
 - **Code Smell Boss, function-length mode**: the current boss only counts bloated *files* (300+ lines, free via `TextDocument.lineCount`); flagging individual 200-line *functions* needs real per-language parsing and is a bigger, separate build.
 
+## [2.9.1] - 2026-10-07
+
+### Added
+- **New Icon**
+
 ## [2.9.0] - 2026-10-06
 
 ### Added
