@@ -7,6 +7,19 @@ All notable changes to the "DevGotchi" extension will be documented in this file
 ### Roadmap — ideas being considered, not yet built
 - **Code Smell Boss, function-length mode**: the current boss only counts bloated *files* (300+ lines, free via `TextDocument.lineCount`); flagging individual 200-line *functions* needs real per-language parsing and is a bigger, separate build.
 
+## [2.10.0] - 2026-10-11
+
+### Added
+- **Verified Sponsor Reward**: new `DevGotchi: Claim Sponsor Reward (verify with GitHub)` command, also linked in ⚙️ Settings and on the daily Sponsors toast. It uses VS Code's built-in GitHub sign-in, only when you click it, to ask GitHub directly whether you sponsor the project. There's no DevGotchi server. A verified sponsorship pays +500 ☕ once per GitHub account, then +100 ☕ per claim at most every 30 days while still sponsoring. Claims are tracked per GitHub login outside your progress data, so a reset or import can't re-earn the one-time bonus.
+- **One-time sponsor ask**: unlocking ⚡ Legendary Dev or a 30-day streak shows a single "DevGotchi is free and always will be" message (in place of that achievement's usual toast) with 💖 Sponsor / Don't Ask Again. It asks at most once per milestone, Don't Ask Again means never, it never stacks with the rating prompt, and it's skipped entirely with Reduce Notifications on.
+- **Sponsor buttons on the Marketplace / Extensions view** (`sponsor` field in package.json) and on the GitHub repo (`.github/FUNDING.yml`).
+- **Collapsible Activity calendar**: click 📅 Activity to show or hide it. It starts collapsed and remembers your choice.
+
+### Changed
+- **Compact panel layout**: Stats now sit in a 2×2 grid (one column below 360px), Focus Sprint fits on a single row, the action buttons fill the available width (about 7 per row instead of 4), and spacing is tighter throughout, so the panel is much shorter.
+- **More readable text**: the panel's font never actually loaded (the webview's security policy blocked the Google Fonts import), so it fell back to thin Courier New. The panel now uses your VS Code editor font, and share cards use SF Mono / Menlo / Consolas. Labels on stats, the active quest, Focus Sprint and the action buttons are semi-bold and slightly larger, and dim text is brighter.
+- **Share card footer** now reads "Free forever — tip the dev: github.com/sponsors/johnfacey".
+
 ## [2.9.1] - 2026-10-07
 
 ### Added

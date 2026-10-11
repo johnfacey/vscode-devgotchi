@@ -1,8 +1,8 @@
 {
   "name": "vscode-devgotchi",
   "displayName": "DevGotchi — Gamify Coding: Pomodoro Timer, XP & Achievements",
-  "description": "Turn VS Code into a cyberpunk RPG. Your living developer avatar tracks focus, energy & motivation in real time — earn XP for every save and commit, run Pomodoro focus sprints, battle real bosses tied to your repo state, and protect your streak. Free forever. No telemetry, no account.",
-  "version": "2.9.1",
+  "description": "Turn VS Code into a cyberpunk RPG. Your living developer avatar tracks focus, energy & motivation in real time — earn XP for every save and commit, run Pomodoro focus sprints, battle real bosses tied to your repo state, and protect your streak. Free forever. No telemetry, no account required.",
+  "version": "2.10.0",
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -14,6 +14,9 @@
   ],
   "icon": "icon.png",
   "publisher": "johnfacey",
+  "sponsor": {
+    "url": "https://github.com/sponsors/johnfacey"
+  },
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -93,6 +96,11 @@
         "category": "DevGotchi"
       },
       {
+        "command": "devgotchi.claimSponsorReward",
+        "title": "Claim Sponsor Reward (verify with GitHub)",
+        "category": "DevGotchi"
+      },
+      {
         "command": "devgotchi.prestige",
         "title": "Prestige (reset Level for a permanent XP badge)",
         "category": "DevGotchi"
@@ -113,14 +121,31 @@
         "category": "DevGotchi"
       }
     ]
-  }, "maintainers": [
+  },
+  "maintainers": [
     "John Facey"
   ],
-    "repository": {
+  "repository": {
     "type": "git",
     "url": "https://github.com/johnfacey/vscode-devgotchi.git"
   },
-    "keywords": ["pomodoro", "productivity", "gamification", "focus", "timer", "motivation", "tamagotchi", "achievements", "streak", "burnout", "rpg", "habit", "game", "deep work", "fun", "tamogotchi"
+  "keywords": [
+    "pomodoro",
+    "productivity",
+    "gamification",
+    "focus",
+    "timer",
+    "motivation",
+    "tamagotchi",
+    "achievements",
+    "streak",
+    "burnout",
+    "rpg",
+    "habit",
+    "game",
+    "deep work",
+    "fun",
+    "tamogotchi"
   ],
   "scripts": {
     "vscode:prepublish": "npm run compile",

@@ -1,6 +1,6 @@
 # 👨‍💻 DevGotchi — Gamify Your Coding Sessions
 
-**DevGotchi** turns VS Code into a cyberpunk RPG. It's a free productivity + gamification extension that tracks your focus, energy, and motivation in real time through a living developer avatar — no telemetry, no accounts, no external servers.
+**DevGotchi** turns VS Code into a cyberpunk RPG. It's a free productivity + gamification extension that tracks your focus, energy, and motivation in real time through a living developer avatar — no telemetry, no accounts, no external servers. (The one exception is opt-in: claiming a sponsor reward asks GitHub to confirm your sponsorship, and only when you click it.)
 
 Save files and push commits to earn XP and Coffee Beans. Let your stats decay and you'll hit **burnout** — a real mechanic with consequences, not just a number. Level up, build a daily streak, unlock 15 achievements, fight three real bosses tied to your actual repo state, and Prestige once you hit the cap.
 
@@ -258,7 +258,7 @@ Going away for a few days shouldn't cost you your streak or leave your dev burnt
 A "Send Feedback / Report a Bug" link at the bottom of the Settings panel (and `DevGotchi: Send Feedback`) opens the GitHub issues page directly — the fastest way to reach me with bugs or ideas.
 
 ### 💖 Buy the Dev a Coffee
-A 💖 **Sponsor** button in the action grid (and another link in Settings) opens GitHub Sponsors and, once per day, grants a small in-game coffee-bean bonus (+25 ☕) just for checking it out. There's no way for a VS Code extension to verify an actual sponsorship, so this deliberately rewards clicking through, not paying — monetization framed as a game mechanic, never a paywall. DevGotchi stays free forever either way.
+A 💖 **Sponsor** button in the action grid (and another link in Settings) opens GitHub Sponsors and, once per day, grants a small in-game coffee-bean bonus (+25 ☕) just for checking it out. Actual sponsors can run **Claim Sponsor Reward** (also linked in Settings): it uses VS Code's built-in GitHub sign-in, *only when you click it*, to ask GitHub directly whether you sponsor the project — no DevGotchi server involved. A verified sponsorship pays **+500 ☕** once per GitHub account, then **+100 ☕** each time you claim again 30+ days later while still sponsoring. Monetization framed as a game mechanic, never a paywall. DevGotchi stays free forever either way. Exported share cards carry a small "tip the dev" footer, and DevGotchi asks *once* — when you unlock Legendary Dev or a 30-day streak — with a **Don't Ask Again** that means never. It's skipped entirely if **Reduce Notifications** is on.
 
 ### 👥 Team Mode
 See your teammates' progress without any server, accounts, or DevGotchi backend — it's synced entirely through git:
@@ -301,6 +301,7 @@ See your teammates' progress without any server, accounts, or DevGotchi backend 
 | `DevGotchi: Toggle Vacation Mode` | Freeze/unfreeze stat decay and your streak |
 | `DevGotchi: Send Feedback` | Open the GitHub issues page to report a bug or suggest a feature |
 | `DevGotchi: Support DevGotchi on GitHub Sponsors` | Opens GitHub Sponsors (+25 ☕ once/day for checking it out) |
+| `DevGotchi: Claim Sponsor Reward (verify with GitHub)` | Optional GitHub sign-in to verify a sponsorship: +500 ☕ once, then +100 ☕ per monthly claim |
 | `DevGotchi: Prestige (reset Level for a permanent XP badge)` | Once you're Level 50, reset to Level 1 for a permanent +5% XP badge |
 | `DevGotchi: Toggle Team Mode` | Turn Team Mode on/off for this workspace |
 | `DevGotchi: Open Team View` | Open the panel and bring up the Team view |

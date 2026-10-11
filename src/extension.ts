@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
 import * as cp from 'child_process';
+import * as https from 'https';
 
 const SKILLS = [
   { id: 'caffeine_tolerance', name: 'Caffeine Tolerance', description: 'Coffee restores 50% more energy', cost: 50 },
@@ -760,7 +761,16 @@ const DAILY_CALENDAR_MILESTONE_BONUS_XP = 100;
 const DAILY_CALENDAR_MILESTONE_BONUS_COFFEE = 100;
 const IDLE_THRESHOLD_MS = 10 * 60 * 1000; // No editor activity for 10 minutes reads as AFK, not "still coding"
 const SPONSOR_CLICK_COFFEE_BONUS = 25;
-const SPONSOR_CLICK_COOLDOWN_MS = 24 * 60 * 60 * 1000; // Once per day — there's no way to verify a real sponsorship, so this rewards checking the page out, not payment
+// Achievements that trigger the one-time sponsor ask (see maybeShowSponsorPrompt), with their lead-in line
+const SPONSOR_PROMPT_MILESTONES: Record<string, string> = {
+  level_25: '⚡ Legendary Dev unlocked!',
+  streak_30: '🔥 30-day streak!',
+};
+const SPONSOR_CLICK_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const SPONSOR_LOGIN = 'johnfacey';
+const SPONSOR_FIRST_CLAIM_BONUS = 500; // One-time, per GitHub account, for a verified sponsorship
+const SPONSOR_MONTHLY_BONUS = 100;     // Each further claim 30+ days later while still sponsoring
+const SPONSOR_MONTHLY_INTERVAL_MS = 30 * 24 * 60 * 60 * 1000; // Once per day — there's no way to verify a real sponsorship, so this rewards checking the page out, not payment
 
 /**
  * User-configurable settings, stored separately from ProgrammerStats so that
@@ -1209,7 +1219,27 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.env.openExternal(vscode.Uri.parse('https://github.com/sponsors/johnfacey'));
       const result = devManager.supportOnSponsors();
       if (result.success) {
+        vscode.window.showInformationMessage(result.message, 'Already a Sponsor? Claim Reward').then(choice => {
+          if (choice) vscode.commands.executeCommand('devgotchi.claimSponsorReward');
+        });
+      }
+      DeveloperPanel.currentPanel?.updateDeveloper();
+    })
+  );
+
+  // Verified sponsor reward: opt-in GitHub sign-in through VS Code's built-in
+  // auth provider, then a direct GitHub API check — no DevGotchi server, and
+  // nothing happens until the user clicks Claim. See claimSponsorReward.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('devgotchi.claimSponsorReward', async () => {
+      const result = await devManager.claimSponsorReward();
+      if (result.success) {
         vscode.window.showInformationMessage(result.message);
+      } else {
+        const SPONSOR = '💖 Sponsor';
+        vscode.window.showWarningMessage(result.message, ...(result.notSponsoring ? [SPONSOR] : [])).then(choice => {
+          if (choice === SPONSOR) vscode.commands.executeCommand('devgotchi.openSponsors');
+        });
       }
       DeveloperPanel.currentPanel?.updateDeveloper();
     })
@@ -1505,7 +1535,7 @@ class WhatsNewPanel {
       }
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body {
-        font-family: 'Courier New', monospace;
+        font-family: var(--vscode-editor-font-family), 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
         background: var(--bg-deep);
         color: var(--text-main);
         padding: 28px;
@@ -1990,6 +2020,41 @@ function normalizeDeveloper(saved: Partial<ProgrammerStats>): ProgrammerStats {
  * Manages the state and logic of the developer avatar.
  * Handles persistence, stat calculations, and game mechanics.
  */
+/** Minimal GitHub GraphQL call; resolves `data` or rejects with a short reason. */
+function githubGraphQL(token: string, query: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({ query });
+    const req = https.request('https://api.github.com/graphql', {
+      method: 'POST',
+      headers: {
+        'Authorization': `bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'User-Agent': 'vscode-devgotchi',
+      },
+      timeout: 15000,
+    }, res => {
+      let raw = '';
+      res.on('data', chunk => raw += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(raw);
+          if (res.statusCode !== 200 || json.errors) {
+            reject(new Error(json.errors?.[0]?.message || `HTTP ${res.statusCode}`));
+          } else {
+            resolve(json.data);
+          }
+        } catch {
+          reject(new Error(`HTTP ${res.statusCode}`));
+        }
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error('timed out')));
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
 class DeveloperManager {
   private developer: ProgrammerStats;
   private settings: DevGotchiSettings;
@@ -1999,6 +2064,7 @@ class DeveloperManager {
   private lastLongFileCount: number = 0;
   private lastErrorIncreaseAt: number = 0; // Timestamp a lint/build error last appeared — drives the secret "Quick Draw" achievement
   private lastActivityAt: number = Date.now(); // Last real editor activity — drives idle detection (see recordActivity/isIdle)
+  private promptShownThisSession = false; // Set by the sponsor ask so the review ask never stacks on top of it
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
@@ -2128,9 +2194,41 @@ class DeveloperManager {
     this.developer.achievements.push(id);
     const ach = ACHIEVEMENTS.find(a => a.id === id)!;
     this.addLog(`Achievement unlocked: ${ach.icon} ${ach.name}`, 'achievement');
-    if (!this.settings.reduceNotifications) {
-      vscode.window.showInformationMessage(`${this.classTag()}🏅 Achievement Unlocked: ${ach.icon} ${ach.name} — ${ach.description}`);
-    }
+    if (this.settings.reduceNotifications) return;
+    if (SPONSOR_PROMPT_MILESTONES[id] && this.maybeShowSponsorPrompt(id)) return; // folded into the sponsor ask — one toast, not two
+    vscode.window.showInformationMessage(`${this.classTag()}🏅 Achievement Unlocked: ${ach.icon} ${ach.name} — ${ach.description}`);
+  }
+
+  /**
+   * The only sponsorship notification DevGotchi ever shows: asked once per
+   * milestone (Legendary Dev, 30-day streak), at a moment of goodwill, and
+   * "Don't Ask Again" means never. Returns true if the prompt was shown.
+   * Existing users who already own these achievements are never asked,
+   * since unlockAchievement() only runs on a fresh unlock.
+   */
+  private maybeShowSponsorPrompt(milestoneId: string): boolean {
+    const state = this.context.globalState.get<{ dismissedForever?: boolean; asked?: string[] }>('sponsorPromptState', {});
+    const asked = state.asked || [];
+    if (state.dismissedForever || asked.includes(milestoneId)) return false;
+    this.context.globalState.update('sponsorPromptState', { ...state, asked: [...asked, milestoneId] });
+    this.promptShownThisSession = true;
+
+    const SPONSOR = '💖 Sponsor';
+    const NEVER = "Don't Ask Again";
+    vscode.window
+      .showInformationMessage(
+        `${this.classTag()}${SPONSOR_PROMPT_MILESTONES[milestoneId]} DevGotchi is free and always will be — if it's made your coding life better, consider sponsoring its development.`,
+        SPONSOR, NEVER
+      )
+      .then((choice) => {
+        if (choice === SPONSOR) {
+          vscode.commands.executeCommand('devgotchi.openSponsors');
+        } else if (choice === NEVER) {
+          const latest = this.context.globalState.get<{ dismissedForever?: boolean; asked?: string[] }>('sponsorPromptState', {});
+          this.context.globalState.update('sponsorPromptState', { ...latest, dismissedForever: true });
+        }
+      });
+    return true;
   }
 
   private checkAchievements() {
@@ -2160,6 +2258,7 @@ class DeveloperManager {
    * "Remind Me Later" / "Don't Ask Again" so it never turns into nagging.
    */
   private maybeShowReviewPrompt() {
+    if (this.promptShownThisSession) return;
     const state = this.context.globalState.get<{ dismissedForever?: boolean; remindAfter?: number }>('reviewPromptState', {});
     if (state.dismissedForever) return;
     if (state.remindAfter && Date.now() < state.remindAfter) return;
@@ -2799,6 +2898,57 @@ class DeveloperManager {
     this.addLog(`💖 Checked out GitHub Sponsors  +${SPONSOR_CLICK_COFFEE_BONUS} ☕`, 'coffee');
     this.saveDeveloper();
     return { success: true, message: `💖 +${SPONSOR_CLICK_COFFEE_BONUS} ☕ — thanks for checking out GitHub Sponsors!` };
+  }
+
+  /**
+   * Rewards an actual sponsorship, verified with GitHub: +500 ☕ the first
+   * time a GitHub account claims, then +100 ☕ per claim at most every 30
+   * days while it's still sponsoring. Claims are tracked per GitHub login in
+   * globalState (not on the developer record), so resetting or importing
+   * progress can't re-farm the one-time bonus.
+   */
+  async claimSponsorReward(): Promise<{ success: boolean; message: string; notSponsoring?: boolean }> {
+    let session: vscode.AuthenticationSession;
+    try {
+      session = await vscode.authentication.getSession('github', ['read:user'], { createIfNone: true });
+    } catch {
+      return { success: false, message: 'GitHub sign-in was cancelled — no reward claimed.' };
+    }
+
+    let login: string;
+    let sponsoring: boolean;
+    try {
+      const data = await githubGraphQL(session.accessToken,
+        `query { viewer { login } user(login: "${SPONSOR_LOGIN}") { viewerIsSponsoring } }`);
+      login = data.viewer.login;
+      sponsoring = !!data.user?.viewerIsSponsoring;
+    } catch (err) {
+      return { success: false, message: `Couldn't reach GitHub to verify your sponsorship (${(err as Error).message}). Try again later.` };
+    }
+
+    if (!sponsoring) {
+      return { success: false, notSponsoring: true, message: `GitHub doesn't show @${login} as a sponsor of @${SPONSOR_LOGIN} yet. Sponsor to unlock +${SPONSOR_FIRST_CLAIM_BONUS} ☕ (plus +${SPONSOR_MONTHLY_BONUS} ☕ every month you claim).` };
+    }
+
+    const claims = this.context.globalState.get<Record<string, { firstAt: number; lastAt: number }>>('sponsorClaims', {});
+    const prior = claims[login];
+    const now = Date.now();
+    let bonus: number;
+    if (!prior) {
+      bonus = SPONSOR_FIRST_CLAIM_BONUS;
+    } else if (now - prior.lastAt >= SPONSOR_MONTHLY_INTERVAL_MS) {
+      bonus = SPONSOR_MONTHLY_BONUS;
+    } else {
+      const days = Math.ceil((prior.lastAt + SPONSOR_MONTHLY_INTERVAL_MS - now) / (24 * 60 * 60 * 1000));
+      return { success: false, message: `💖 Thanks for sponsoring, @${login}! Your next +${SPONSOR_MONTHLY_BONUS} ☕ can be claimed in ${days} day${days === 1 ? '' : 's'}.` };
+    }
+
+    await this.context.globalState.update('sponsorClaims', { ...claims, [login]: { firstAt: prior?.firstAt ?? now, lastAt: now } });
+    this.developer.coffee += bonus;
+    this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + bonus;
+    this.addLog(`💖 Sponsor reward claimed (@${login})  +${bonus} ☕`, 'coffee');
+    this.saveDeveloper();
+    return { success: true, message: `💖 Thank you for sponsoring DevGotchi, @${login}! +${bonus} ☕` };
   }
 
   /**
@@ -3701,6 +3851,7 @@ class DeveloperPanel {
         case 'toggle-vacation-mode': this.updatePanel(this.devManager.setVacationMode(!!message.enabled)); break;
         case 'open-feedback': vscode.commands.executeCommand('devgotchi.sendFeedback'); break;
         case 'open-sponsors': vscode.commands.executeCommand('devgotchi.openSponsors'); break;
+        case 'claim-sponsor-reward': vscode.commands.executeCommand('devgotchi.claimSponsorReward'); break;
         case 'get-team-data': this.sendTeamData(); break;
         case 'toggle-team-mode':
           Promise.resolve(vscode.commands.executeCommand('devgotchi.toggleTeamMode')).then(() => {
@@ -3872,7 +4023,6 @@ class DeveloperPanel {
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
 
     :root {
       --bg-deep:    #080812;
@@ -3885,17 +4035,17 @@ class DeveloperPanel {
       --neon-green: #00e676;
       --neon-red:   #ff1744;
       --text-main:  #e8e8ff;
-      --text-dim:   #7070a0;
+      --text-dim:   #9090c0;
       --border:     #2a2a4a;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: 'Share Tech Mono', 'Courier New', monospace;
+      font-family: var(--vscode-editor-font-family), 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
       background: var(--bg-deep);
       color: var(--text-main);
-      padding: 16px;
+      padding: 10px;
       min-height: 100vh;
     }
 
@@ -3907,8 +4057,8 @@ class DeveloperPanel {
       border: 1px solid var(--border);
       border-top: 2px solid var(--neon-purple);
       border-radius: 4px;
-      padding: 14px 14px 12px;
-      margin-bottom: 12px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
       position: relative;
       overflow: hidden;
     }
@@ -3917,13 +4067,13 @@ class DeveloperPanel {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
     }
 
     .scene-wrap {
       position: relative;
-      margin: 0 -14px;
-      width: calc(100% + 28px);
+      margin: 0 -12px;
+      width: calc(100% + 24px);
     }
     #sceneCanvas {
       width: 100%;
@@ -3981,7 +4131,7 @@ class DeveloperPanel {
       color: var(--text-dim);
       letter-spacing: 2px;
       text-transform: uppercase;
-      margin-bottom: 6px;
+      margin-bottom: 2px;
     }
 
     .level-badge {
@@ -3994,7 +4144,6 @@ class DeveloperPanel {
       color: white;
       letter-spacing: 2px;
       box-shadow: 0 0 10px rgba(157,78,221,0.5);
-      margin-bottom: 8px;
     }
 
     .xp-row { display: flex; align-items: center; gap: 8px; }
@@ -4005,32 +4154,36 @@ class DeveloperPanel {
     /* ── RESOURCES ROW ── */
     .resources-row {
       display: flex;
-      gap: 10px;
-      margin-top: 12px;
+      gap: 8px;
+      margin-top: 8px;
     }
     .resource-chip {
       flex: 1;
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 4px;
-      padding: 8px 12px;
+      padding: 5px 10px;
       display: flex;
       align-items: center;
       gap: 8px;
     }
-    .resource-icon { font-size: 18px; }
+    .resource-icon { font-size: 15px; }
     .resource-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
-    .resource-value { font-size: 16px; font-weight: bold; color: var(--neon-gold); }
+    .resource-value { font-size: 14px; font-weight: bold; color: var(--neon-gold); }
 
     /* ── ACTIVITY CALENDAR ── */
     .calendar-card {
-      margin-top: 10px;
+      margin-top: 8px;
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 4px;
-      padding: 8px 12px;
+      padding: 6px 10px;
     }
-    .calendar-title { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+    .calendar-title { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; cursor: pointer; user-select: none; }
+    .calendar-title:hover { color: var(--text-main); }
+    .calendar-caret { display: inline-block; width: 10px; }
+    .calendar-card.collapsed .calendar-title { margin-bottom: 0; }
+    .calendar-card.collapsed #streakCalCanvas { display: none; }
     #streakCalCanvas { width: 100%; height: 60px; display: block; }
     .resource-streak .resource-value { color: var(--neon-pink); }
 
@@ -4039,39 +4192,49 @@ class DeveloperPanel {
       background: var(--bg-panel);
       border: 1px solid var(--border);
       border-radius: 4px;
-      padding: 14px;
-      margin-bottom: 12px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
     }
     .section-title {
       font-size: 10px;
-      letter-spacing: 3px;
+      font-weight: 600;
+      letter-spacing: 2px;
       color: var(--text-dim);
       text-transform: uppercase;
-      margin-bottom: 12px;
+      margin-bottom: 8px;
       border-bottom: 1px solid var(--border);
-      padding-bottom: 6px;
+      padding-bottom: 4px;
     }
 
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 14px;
+    }
+    @media (max-width: 360px) {
+      .stats-grid { grid-template-columns: 1fr; }
+    }
     .stat-row {
       display: flex;
       align-items: center;
-      gap: 10px;
-      margin-bottom: 10px;
+      gap: 6px;
+      min-width: 0;
     }
-    .stat-row:last-child { margin-bottom: 0; }
 
-    .stat-icon { font-size: 14px; width: 20px; text-align: center; flex-shrink: 0; }
+    .stat-icon { font-size: 13px; width: 18px; text-align: center; flex-shrink: 0; }
     .stat-name {
-      font-size: 11px;
-      letter-spacing: 2px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0;
       text-transform: uppercase;
       color: var(--text-dim);
-      width: 80px;
+      width: 62px;
       flex-shrink: 0;
     }
     .stat-track {
       flex: 1;
-      height: 10px;
+      min-width: 20px;
+      height: 8px;
       background: #1a1a30;
       border-radius: 1px;
       overflow: hidden;
@@ -4089,7 +4252,7 @@ class DeveloperPanel {
     .stat-val {
       font-size: 12px;
       font-weight: bold;
-      width: 36px;
+      width: 26px;
       text-align: right;
       flex-shrink: 0;
     }
@@ -4098,20 +4261,22 @@ class DeveloperPanel {
     .bottom-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-bottom: 12px;
+      gap: 8px;
+      margin-bottom: 8px;
     }
     .mini-card {
       background: var(--bg-panel);
       border: 1px solid var(--border);
       border-radius: 4px;
-      padding: 12px;
+      padding: 8px 10px;
+      min-width: 0;
     }
 
     .quest-name {
-      font-size: 11px;
+      font-size: 12px;
+      font-weight: 600;
       color: var(--text-main);
-      margin-bottom: 8px;
+      margin-bottom: 6px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -4128,7 +4293,7 @@ class DeveloperPanel {
       box-shadow: 0 0 6px var(--neon-green);
       transition: width 0.4s;
     }
-    .quest-pct { font-size: 10px; color: var(--text-dim); margin-top: 4px; text-align: right; }
+    .quest-pct { font-size: 11px; color: var(--text-dim); margin-top: 4px; text-align: right; }
 
     .boss-title {
       font-size: 10px;
@@ -4200,37 +4365,44 @@ class DeveloperPanel {
       background: var(--bg-panel);
       border: 1px solid var(--border);
       border-radius: 4px;
-      padding: 12px 14px;
-      margin-bottom: 12px;
-      text-align: center;
+      padding: 8px 10px;
+      margin-bottom: 8px;
     }
-    .focus-desc { font-size: 10.5px; color: var(--text-dim); margin: 4px 0 10px; }
-    .focus-btn-row { display: flex; gap: 8px; }
+    .focus-row { display: flex; align-items: center; gap: 6px; }
+    .focus-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      white-space: nowrap;
+      margin-right: auto;
+      cursor: help;
+    }
+    .focus-btn-row { display: flex; gap: 6px; }
     .focus-len-btn {
-      flex: 1;
       background: var(--bg-card);
       border: 1px solid var(--neon-purple);
       color: var(--text-main);
       font-family: inherit;
       font-size: 11px;
-      letter-spacing: 1px;
-      padding: 8px 4px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      padding: 5px 8px;
       border-radius: 3px;
       cursor: pointer;
     }
     .focus-len-btn:hover { box-shadow: 0 0 10px rgba(157,78,221,0.4); }
     .focus-multiplier {
-      float: right;
       font-size: 10px;
       color: var(--neon-gold);
       letter-spacing: 0.5px;
     }
     .focus-countdown {
-      font-size: 30px;
+      font-size: 20px;
       font-weight: bold;
       color: var(--neon-purple);
       text-shadow: 0 0 10px rgba(157,78,221,0.6);
-      margin: 6px 0 10px;
       letter-spacing: 2px;
     }
     .focus-cancel-btn {
@@ -4238,21 +4410,22 @@ class DeveloperPanel {
       border: 1px solid var(--neon-red);
       color: #ff7070;
       font-family: inherit;
-      font-size: 10.5px;
-      letter-spacing: 1px;
-      padding: 7px 14px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      padding: 5px 10px;
       border-radius: 3px;
       cursor: pointer;
     }
     .focus-cancel-btn:hover { box-shadow: 0 0 10px rgba(255,23,68,0.4); }
-    .boss-hp-text { font-size: 10px; color: var(--text-dim); margin-top: 4px; text-align: right; }
+    .boss-hp-text { font-size: 11px; color: var(--text-dim); margin-top: 4px; text-align: right; }
 
     /* ── ACTION BUTTONS ── */
     .actions {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 8px;
-      margin-bottom: 12px;
+      grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+      gap: 6px;
+      margin-bottom: 8px;
     }
 
     button {
@@ -4267,19 +4440,19 @@ class DeveloperPanel {
       background: var(--bg-card);
       border: 1px solid var(--border);
       color: var(--text-main);
-      padding: 10px 6px;
+      padding: 6px 2px;
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 4px;
+      gap: 3px;
     }
     .action-btn:hover {
       border-color: var(--neon-purple);
       box-shadow: 0 0 8px rgba(157,78,221,0.3);
       transform: translateY(-2px);
     }
-    .action-icon { font-size: 20px; line-height: 1; }
-    .action-label { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); }
+    .action-icon { font-size: 16px; line-height: 1; }
+    .action-label { font-size: 9.5px; font-weight: 600; letter-spacing: 0; text-transform: uppercase; color: var(--text-dim); }
 
     /* ── CHALLENGE PANEL ── */
     .challenge-container {
@@ -4780,15 +4953,15 @@ class DeveloperPanel {
               </div>
             </div>
           </div>
-          <div class="calendar-card">
-            <div class="calendar-title">📅 Activity</div>
+          <div class="calendar-card collapsed" id="calendarCard">
+            <div class="calendar-title" onclick="toggleCalendar()" title="Show/hide activity calendar"><span class="calendar-caret" id="calendarCaret">▸</span> 📅 Activity</div>
             <canvas id="streakCalCanvas" width="400" height="60"></canvas>
           </div>
         </div>
 
         <!-- ── STATS ── -->
         <div class="stats-panel">
-          <div class="section-title">◈ Stats</div>
+          <div class="stats-grid">
           <div class="stat-row">
             <div class="stat-icon">🎯</div>
             <div class="stat-name">Focus</div>
@@ -4813,6 +4986,7 @@ class DeveloperPanel {
             <div class="stat-track"><div id="healthBar" class="stat-fill health-fill" style="width:100%"></div></div>
             <div class="stat-val" id="healthText" style="color:var(--neon-red)">100</div>
           </div>
+          </div>
         </div>
 
         <!-- ── ACTIVE QUEST + BURNOUT BOSS ── -->
@@ -4833,19 +5007,18 @@ class DeveloperPanel {
 
         <!-- ── FOCUS SPRINT (Pomodoro-style timed XP boost) ── -->
         <div class="focus-card" id="focusCard">
-          <div id="focusInactive">
-            <div class="section-title">◈ Focus Sprint</div>
-            <div class="focus-desc">Run a timed sprint for 1.5x XP and slower Focus decay.</div>
+          <div id="focusInactive" class="focus-row">
+            <div class="focus-label" title="Run a timed sprint for 1.5x XP and slower Focus decay.">◈ Focus Sprint</div>
             <div class="focus-btn-row">
               <button class="focus-len-btn" onclick="startFocusSprint(15)">15 MIN</button>
               <button class="focus-len-btn" onclick="startFocusSprint(25)">25 MIN</button>
               <button class="focus-len-btn" onclick="startFocusSprint(50)">50 MIN</button>
             </div>
           </div>
-          <div id="focusActive" style="display:none">
-            <div class="section-title">◈ Focus Sprint <span class="focus-multiplier">1.5x XP</span></div>
+          <div id="focusActive" class="focus-row" style="display:none">
+            <div class="focus-label">◈ Sprint <span class="focus-multiplier">1.5x XP</span></div>
             <div class="focus-countdown" id="focusCountdown">25:00</div>
-            <button class="focus-cancel-btn" onclick="cancelFocusSprint()">CANCEL SPRINT</button>
+            <button class="focus-cancel-btn" onclick="cancelFocusSprint()">CANCEL</button>
           </div>
         </div>
 
@@ -5123,6 +5296,9 @@ class DeveloperPanel {
           </div>
           <div class="settings-row" style="text-align:center; margin-top:8px; margin-bottom:0;">
             <a href="#" onclick="openSponsors(); return false;" style="color:var(--neon-pink); font-size:12px; text-decoration:underline; cursor:pointer;">💖 Support DevGotchi on GitHub Sponsors</a>
+            <div style="margin-top:6px;">
+              <a href="#" onclick="claimSponsorReward(); return false;" title="Sign in with GitHub to verify your sponsorship: +500 ☕ once, then +100 ☕ each month you claim" style="color:var(--neon-gold); font-size:11px; text-decoration:underline; cursor:pointer;">🎁 Already a sponsor? Claim your coffee beans</a>
+            </div>
           </div>
         </div>
       </div>
@@ -5268,6 +5444,7 @@ class DeveloperPanel {
 
         function sendFeedback() { vscode.postMessage({ command: 'open-feedback' }); }
         function openSponsors() { vscode.postMessage({ command: 'open-sponsors' }); }
+        function claimSponsorReward() { vscode.postMessage({ command: 'claim-sponsor-reward' }); }
 
         // ── TEAM MODE ──
         // Like Vacation Mode, this takes effect immediately rather than
@@ -5349,8 +5526,8 @@ class DeveloperPanel {
           if (!currentDev) return;
           const remaining = (currentDev.focusSprintEndsAt || 0) - Date.now();
           const active = remaining > 0;
-          document.getElementById('focusInactive').style.display = active ? 'none' : 'block';
-          document.getElementById('focusActive').style.display = active ? 'block' : 'none';
+          document.getElementById('focusInactive').style.display = active ? 'none' : 'flex';
+          document.getElementById('focusActive').style.display = active ? 'flex' : 'none';
           if (active) {
             document.getElementById('focusCountdown').textContent = formatMMSS(remaining);
           }
@@ -6866,10 +7043,10 @@ class DeveloperPanel {
           // Header wordmark
           ctx.textAlign = 'left';
           ctx.fillStyle = '#e8e8ff';
-          ctx.font = 'bold 30px "Share Tech Mono", monospace';
+          ctx.font = 'bold 30px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
           ctx.fillText('DEVGOTCHI', 56, 78);
           ctx.fillStyle = '#00e5ff';
-          ctx.font = '14px "Share Tech Mono", monospace';
+          ctx.font = '14px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
           ctx.fillText(subtitle, 58, 100);
         }
 
@@ -6890,15 +7067,15 @@ class DeveloperPanel {
           // Dev name + title
           ctx.textAlign = 'left';
           ctx.fillStyle = '#7070a0';
-          ctx.font = '16px "Share Tech Mono", monospace';
+          ctx.font = '16px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
           ctx.fillText(getTitleForLevel(dev.level).toUpperCase(), 58, 158);
           ctx.fillStyle = '#e8e8ff';
-          ctx.font = 'bold 44px "Share Tech Mono", monospace';
+          ctx.font = 'bold 44px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
           ctx.fillText(dev.name || 'Dev', 56, 206);
 
           // Level badge
           ctx.fillStyle = '#ffd740';
-          ctx.font = 'bold 22px "Share Tech Mono", monospace';
+          ctx.font = 'bold 22px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
           ctx.textAlign = 'right';
           ctx.fillText('LEVEL ' + dev.level, W-56, 158);
 
@@ -6916,7 +7093,7 @@ class DeveloperPanel {
           ctx.fill();
           ctx.textAlign = 'right';
           ctx.fillStyle = '#7070a0';
-          ctx.font = '13px "Share Tech Mono", monospace';
+          ctx.font = '13px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
           ctx.fillText(dev.xp + ' / ' + xpNeeded + ' XP', W-56, barY + 32);
 
           // Stat readout
@@ -6932,10 +7109,10 @@ class DeveloperPanel {
             const sx = 56 + i * statColW;
             ctx.textAlign = 'left';
             ctx.fillStyle = '#7070a0';
-            ctx.font = '11px "Share Tech Mono", monospace';
+            ctx.font = '11px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
             ctx.fillText(s[0], sx, statY);
             ctx.fillStyle = s[2];
-            ctx.font = 'bold 26px "Share Tech Mono", monospace';
+            ctx.font = 'bold 26px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
             ctx.fillText(String(s[1]), sx, statY + 32);
           });
 
@@ -6969,10 +7146,10 @@ class DeveloperPanel {
             ctx.font = '34px sans-serif';
             ctx.fillText(t[0], tx + tileW/2, tileY + 52);
             ctx.fillStyle = '#e8e8ff';
-            ctx.font = 'bold 24px "Share Tech Mono", monospace';
+            ctx.font = 'bold 24px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
             ctx.fillText(t[1], tx + tileW/2, tileY + 92);
             ctx.fillStyle = '#7070a0';
-            ctx.font = '10px "Share Tech Mono", monospace';
+            ctx.font = '10px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
             ctx.fillText(t[2], tx + tileW/2, tileY + 118);
           });
         }
@@ -6980,8 +7157,8 @@ class DeveloperPanel {
         function drawCardFooter(ctx, W, H) {
           ctx.textAlign = 'center';
           ctx.fillStyle = '#5a5878';
-          ctx.font = '13px "Share Tech Mono", monospace';
-          ctx.fillText('Built with DevGotchi — a virtual developer for VS Code', W/2, H - 34);
+          ctx.font = '13px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
+          ctx.fillText('Built with DevGotchi for VS Code · Free forever — tip the dev: github.com/sponsors/johnfacey', W/2, H - 34);
         }
 
         // Contribution-graph-style heatmap (GitHub-style) for the recap card —
@@ -7042,15 +7219,15 @@ class DeveloperPanel {
           // Dev name + label
           ctx.textAlign = 'left';
           ctx.fillStyle = '#7070a0';
-          ctx.font = '16px "Share Tech Mono", monospace';
+          ctx.font = '16px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
           ctx.fillText('THIS WEEK IN CODE', 58, 158);
           ctx.fillStyle = '#e8e8ff';
-          ctx.font = 'bold 44px "Share Tech Mono", monospace';
+          ctx.font = 'bold 44px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
           ctx.fillText(dev.name || 'Dev', 56, 206);
 
           // Level badge (top right)
           ctx.fillStyle = '#ffd740';
-          ctx.font = 'bold 22px "Share Tech Mono", monospace';
+          ctx.font = 'bold 22px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
           ctx.textAlign = 'right';
           const levelLabel = (r && r.newLevel > r.prevLevel) ? ('LEVEL ' + r.prevLevel + ' → ' + r.newLevel) : ('LEVEL ' + dev.level);
           ctx.fillText(levelLabel, W-56, 158);
@@ -7058,7 +7235,7 @@ class DeveloperPanel {
           if (!r) {
             ctx.textAlign = 'center';
             ctx.fillStyle = '#7070a0';
-            ctx.font = '18px "Share Tech Mono", monospace';
+            ctx.font = '18px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
             ctx.fillText('Your first Weekly Recap unlocks after 7 days of tracked activity.', W/2, 320);
             drawCardFooter(ctx, W, H);
             return;
@@ -7075,11 +7252,11 @@ class DeveloperPanel {
 
           ctx.textAlign = 'left';
           ctx.fillStyle = '#7070a0';
-          ctx.font = '13px "Share Tech Mono", monospace';
+          ctx.font = '13px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
           ctx.fillText('🔥 ' + (r.streak || 0) + '-day streak', 56, 400);
 
           ctx.fillStyle = '#7070a0';
-          ctx.font = '11px "Share Tech Mono", monospace';
+          ctx.font = '11px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
           ctx.fillText('PAST 12 MONTHS', 56, 428);
           drawContributionGraph(ctx, 56, 440, W - 112, dev.activityDates);
 
@@ -7125,21 +7302,21 @@ class DeveloperPanel {
 
           ctx.textAlign = 'left';
           ctx.fillStyle = '#7070a0';
-          ctx.font = '16px "Share Tech Mono", monospace';
+          ctx.font = '16px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
           ctx.fillText('YEAR IN CODE — WRAPPED', 58, 158);
           ctx.fillStyle = '#e8e8ff';
-          ctx.font = 'bold 44px "Share Tech Mono", monospace';
+          ctx.font = 'bold 44px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
           ctx.fillText(dev.name || 'Dev', 56, 206);
 
           ctx.fillStyle = '#ffd740';
-          ctx.font = 'bold 22px "Share Tech Mono", monospace';
+          ctx.font = 'bold 22px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
           ctx.textAlign = 'right';
           ctx.fillText('LEVEL ' + (r ? r.level : dev.level), W-56, 158);
 
           if (!r) {
             ctx.textAlign = 'center';
             ctx.fillStyle = '#7070a0';
-            ctx.font = '18px "Share Tech Mono", monospace';
+            ctx.font = '18px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
             ctx.fillText('Your Year in Code Wrapped unlocks after a year of tracked activity.', W/2, 320);
             drawCardFooter(ctx, W, H);
             return;
@@ -7155,11 +7332,11 @@ class DeveloperPanel {
 
           ctx.textAlign = 'left';
           ctx.fillStyle = '#7070a0';
-          ctx.font = '13px "Share Tech Mono", monospace';
+          ctx.font = '13px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
           ctx.fillText(getHourFlavor(r.mostProductiveHour) + ' · 🏅 ' + r.achievementsUnlocked + ' achievements unlocked', 56, 400);
 
           ctx.fillStyle = '#7070a0';
-          ctx.font = '11px "Share Tech Mono", monospace';
+          ctx.font = '11px "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
           ctx.fillText('PAST 12 MONTHS', 56, 428);
           drawContributionGraph(ctx, 56, 440, W - 112, dev.activityDates);
 
@@ -7349,6 +7526,18 @@ class DeveloperPanel {
           const { dataUrl, suggestedName } = renderActiveShareCanvas();
           vscode.postMessage({ command: 'flex-share', dataUrl, suggestedName, caption: buildFlexCaption() });
         }
+
+        // ── ACTIVITY CALENDAR (collapsible, remembered via webview state) ──
+        function setCalendarCollapsed(collapsed) {
+          document.getElementById('calendarCard').classList.toggle('collapsed', collapsed);
+          document.getElementById('calendarCaret').textContent = collapsed ? '▸' : '▾';
+        }
+        function toggleCalendar() {
+          const collapsed = !document.getElementById('calendarCard').classList.contains('collapsed');
+          setCalendarCollapsed(collapsed);
+          vscode.setState({ ...(vscode.getState() || {}), calendarCollapsed: collapsed });
+        }
+        setCalendarCollapsed((vscode.getState() || {}).calendarCollapsed !== false);
 
         // ── ACTIVITY LOG ──────────────────────────────────────────────────
         function toggleLog() {
