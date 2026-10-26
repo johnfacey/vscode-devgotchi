@@ -349,7 +349,7 @@ interface BossAffixDef {
   emoji: string;
   description: string;
   bugStressMultiplier?: number;    // Linter Stress energy/motivation drain from active errors
-  bossBonusMultiplier?: number;    // Bug Boss / Merge Kraken / Code Smell Boss defeat XP+coffee bonus
+  bossBonusMultiplier?: number;    // Bug Boss / Merge Kraken / Code Smell Boss / Stale Branch Hydra defeat XP+coffee bonus
   sprintCoffeeMultiplier?: number; // Focus Sprint completion coffee bonus
   dailyBonusMultiplier?: number;   // Daily login bonus coffee
   decayMultiplier?: number;        // Energy/motivation/focus passive decay rate
@@ -664,6 +664,8 @@ interface ProgrammerStats {
   activeErrorCount?: number;  // Live count of active lint/build errors, drives the Bug Boss card
   mergeConflictCount?: number; // Live count of unresolved git merge-conflict files, drives the Merge Conflict Kraken card
   longFileCount?: number; // Live count of currently-open files over LONG_FILE_LINE_THRESHOLD lines, drives the Code Smell Boss card
+  longFunctionCount?: number; // Live count of functions/methods over LONG_FUNCTION_LINE_THRESHOLD lines in open files, also Code Smell Boss HP
+  staleBranchCount?: number; // Live count of stale local branches, drives the Stale Branch Hydra card
   totalXpEarned?: number;     // Lifetime XP earned (never decreases on level-up, unlike `xp`)
   lastWeeklyRecapAt?: number; // Timestamp of the last weekly recap notification
   weeklyRecapSnapshot?: WeeklyRecapSnapshot; // Stat snapshot the next recap will diff against
@@ -748,8 +750,14 @@ const MERGE_KRAKEN_DEFEAT_BONUS_XP = 30;
 const MERGE_KRAKEN_DEFEAT_BONUS_COFFEE = 15;
 const LONG_FILE_LINE_THRESHOLD = 300; // Files past this line count count as Code Smell Boss HP — matches the common ESLint max-lines default
 const CODE_SMELL_REFACTOR_XP_PER_FILE = 40; // Chunkier than a bug fix's 5 XP — shrinking a bloated file below threshold is real refactoring work
+const LONG_FUNCTION_LINE_THRESHOLD = 200; // Functions/methods past this line count also count as Code Smell Boss HP
+const CODE_SMELL_REFACTOR_XP_PER_FUNCTION = 25; // Less than a whole file — splitting one function is a smaller job
 const CODE_SMELL_BOSS_DEFEAT_BONUS_XP = 30;
 const CODE_SMELL_BOSS_DEFEAT_BONUS_COFFEE = 15;
+const STALE_BRANCH_DAYS = 30; // Local branches whose tip commit is older than this count as Stale Branch Hydra HP
+const STALE_BRANCH_PRUNE_XP_PER_BRANCH = 10;
+const STALE_BRANCH_HYDRA_DEFEAT_BONUS_XP = 30;
+const STALE_BRANCH_HYDRA_DEFEAT_BONUS_COFFEE = 15;
 const TEAM_RAID_BOSS_DEFEAT_BONUS_XP = 25;
 const TEAM_RAID_BOSS_DEFEAT_BONUS_COFFEE = 20;
 const WEEKLY_RECAP_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -827,6 +835,64 @@ function countOpenLongFiles(): number {
   return vscode.workspace.textDocuments.filter(
     doc => doc.uri.scheme === 'file' && doc.lineCount > LONG_FILE_LINE_THRESHOLD
   ).length;
+}
+
+const FUNCTION_SYMBOL_KINDS = new Set([vscode.SymbolKind.Function, vscode.SymbolKind.Method, vscode.SymbolKind.Constructor]);
+const longFunctionCountCache = new Map<string, { version: number; count: number }>(); // Keyed by document URI
+
+/**
+ * Code Smell Boss function-length mode: counts functions, methods and
+ * constructors over LONG_FUNCTION_LINE_THRESHOLD lines in one open
+ * document. Function boundaries come from the language's own document
+ * symbol provider (the same data as the Outline view), so every language
+ * with an extension gets this for free with no per-language parsing — and
+ * a language without one just counts 0. Nested functions are counted on
+ * their own, so a long helper inside a long function is two smells.
+ *
+ * Cached per document version so rechecking every open file on each
+ * save/open/close only queries the ones that actually changed. A file at
+ * or under the threshold can't contain a long function, so it skips the
+ * provider entirely. Empty results aren't cached: right after activation
+ * the language server may not be ready yet, and an empty answer then
+ * shouldn't stick until the next edit.
+ */
+async function countLongFunctionsInDocument(doc: vscode.TextDocument): Promise<number> {
+  if (doc.lineCount <= LONG_FUNCTION_LINE_THRESHOLD) return 0;
+  const key = doc.uri.toString();
+  const cached = longFunctionCountCache.get(key);
+  if (cached && cached.version === doc.version) return cached.count;
+
+  let symbols: (vscode.DocumentSymbol | vscode.SymbolInformation)[] | undefined;
+  try {
+    symbols = await vscode.commands.executeCommand<(vscode.DocumentSymbol | vscode.SymbolInformation)[]>(
+      'vscode.executeDocumentSymbolProvider', doc.uri
+    );
+  } catch {
+    return 0;
+  }
+  if (!symbols || symbols.length === 0) return 0;
+
+  let count = 0;
+  const walk = (list: (vscode.DocumentSymbol | vscode.SymbolInformation)[]) => {
+    for (const symbol of list) {
+      // Providers return either hierarchical DocumentSymbols or flat SymbolInformation
+      const range = 'location' in symbol ? symbol.location.range : symbol.range;
+      if (FUNCTION_SYMBOL_KINDS.has(symbol.kind) && range.end.line - range.start.line + 1 > LONG_FUNCTION_LINE_THRESHOLD) {
+        count++;
+      }
+      if ('children' in symbol && symbol.children) walk(symbol.children);
+    }
+  };
+  walk(symbols);
+  longFunctionCountCache.set(key, { version: doc.version, count });
+  return count;
+}
+
+/** Sums countLongFunctionsInDocument over every open file — see countOpenLongFiles for why only open ones. */
+async function countOpenLongFunctions(): Promise<number> {
+  const docs = vscode.workspace.textDocuments.filter(doc => doc.uri.scheme === 'file');
+  const counts = await Promise.all(docs.map(countLongFunctionsInDocument));
+  return counts.reduce((sum, n) => sum + n, 0);
 }
 
 /**
@@ -1307,7 +1373,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.workspace.onDidSaveTextDocument(doc => {
       devManager.recordActivity();
       devManager.onCodeSaved(resolveSavedLanguage(doc));
-      devManager.updateLongFileCount(countOpenLongFiles());
+      refreshCodeSmellBoss();
       updateStatusBar();
       DeveloperPanel.currentPanel?.updateDeveloper();
     })
@@ -1362,8 +1428,19 @@ export function activate(context: vscode.ExtensionContext) {
       // so this is checked on every state change, not just the HEAD-moved
       // branch below.
       devManager.setInitialConflictCount((repo.state.mergeChanges || []).length);
+
+      // Stale Branch Hydra: HP is the live count of merged-but-undeleted or
+      // long-untouched local branches (see countStaleBranches). Branch
+      // creates/deletes fire ref changes on the same onDidChange hook as the
+      // Kraken, so no polling — two git calls per state change is cheap.
+      const repoRoot: string | undefined = repo.rootUri?.fsPath;
+      const repoGitPath: string = git.git?.path || 'git';
+      const countRepoStaleBranches = () => (repoRoot ? countStaleBranches(repoGitPath, repoRoot) : 0);
+      devManager.setInitialStaleBranchCount(countRepoStaleBranches());
+
       repo.state.onDidChange(() => {
         devManager.updateConflictCount((repo.state.mergeChanges || []).length);
+        devManager.updateStaleBranchCount(countRepoStaleBranches());
         updateStatusBar();
         DeveloperPanel.currentPanel?.updateDeveloper();
 
@@ -1415,22 +1492,38 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // Code Smell Boss: also recheck on open/close (save is already wired up
-  // above, via countOpenLongFiles — see its doc comment for why this is
-  // scoped to open documents rather than a workspace-wide scan).
-  devManager.setInitialLongFileCount(countOpenLongFiles());
-  context.subscriptions.push(
-    vscode.workspace.onDidOpenTextDocument(() => {
-      devManager.updateLongFileCount(countOpenLongFiles());
+  // above) — see countOpenLongFiles / countLongFunctionsInDocument for why
+  // this is scoped to open documents rather than a workspace-wide scan.
+  // Switching editors rechecks too: it's cheap thanks to the per-version
+  // cache, and it picks up long functions in files that were opened before
+  // their language server was ready.
+  function refreshCodeSmellBoss(initial = false) {
+    const seq = ++codeSmellScanSeq;
+    countOpenLongFunctions().then(functions => {
+      if (seq !== codeSmellScanSeq) return; // A newer scan already started — let it report instead
+      if (initial) {
+        devManager.setInitialCodeSmellCounts(countOpenLongFiles(), functions);
+      } else {
+        devManager.updateCodeSmellCounts(countOpenLongFiles(), functions);
+      }
       updateStatusBar();
       DeveloperPanel.currentPanel?.updateDeveloper();
+    }, () => {});
+  }
+  let codeSmellScanSeq = 0;
+  devManager.setInitialCodeSmellCounts(countOpenLongFiles(), 0);
+  refreshCodeSmellBoss(true);
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument(() => refreshCodeSmellBoss())
+  );
+  context.subscriptions.push(
+    vscode.workspace.onDidCloseTextDocument(doc => {
+      longFunctionCountCache.delete(doc.uri.toString());
+      refreshCodeSmellBoss();
     })
   );
   context.subscriptions.push(
-    vscode.workspace.onDidCloseTextDocument(() => {
-      devManager.updateLongFileCount(countOpenLongFiles());
-      updateStatusBar();
-      DeveloperPanel.currentPanel?.updateDeveloper();
-    })
+    vscode.window.onDidChangeActiveTextEditor(() => refreshCodeSmellBoss())
   );
 }
 
@@ -1667,6 +1760,44 @@ function getGitIdentity(gitPath: string, cwd: string, execFn?: ExecGitFn): { nam
   const email = tryRunGit(gitPath, ['config', 'user.email'], cwd, execFn);
   if (!name || !email) return undefined;
   return { name, email };
+}
+
+/**
+ * Stale Branch Hydra detection: counts local branches that are either
+ * already merged into HEAD (so deleting them loses nothing) or whose tip
+ * commit is older than STALE_BRANCH_DAYS — counted once if both. Excludes
+ * the current branch, main and master; local branches only, never remotes.
+ *
+ * "Merged" deliberately means merged into HEAD, not into main: a branch
+ * merged into main while you're sitting on an unrelated feature branch won't
+ * count until you're back on main. That keeps this to a couple of cheap git
+ * calls with no main-branch detection. Worktrees are out of scope — this
+ * counts whatever `git branch` sees from `cwd`.
+ *
+ * Fails closed like the rest of the git shell-outs: no repo, no git binary,
+ * an unborn repo or any failed call just means 0 HP, never a throw.
+ */
+function countStaleBranches(gitPath: string, cwd: string, execFn?: ExecGitFn, now: number = Date.now()): number {
+  const all = tryRunGit(gitPath, ['branch', '--format=%(refname:short)%00%(committerdate:unix)'], cwd, execFn);
+  const merged = tryRunGit(gitPath, ['branch', '--merged', 'HEAD', '--format=%(refname:short)'], cwd, execFn);
+  if (!all || merged === undefined) return 0;
+  const current = tryRunGit(gitPath, ['branch', '--show-current'], cwd, execFn) || ''; // Empty on detached HEAD
+  // Detached HEAD shows up as a "(HEAD detached at …)" pseudo-branch — never a real ref name.
+  const excluded = (name: string) => !name || name.startsWith('(') || name === current || name === 'main' || name === 'master';
+  const staleCutoffSecs = (now - STALE_BRANCH_DAYS * 24 * 60 * 60 * 1000) / 1000;
+
+  const hydraHeads = new Set<string>();
+  for (const line of all.split('\n')) {
+    const [name, date] = line.trim().split('\0');
+    if (excluded(name)) continue;
+    const tipSecs = Number(date);
+    if (Number.isFinite(tipSecs) && tipSecs > 0 && tipSecs < staleCutoffSecs) hydraHeads.add(name);
+  }
+  for (const line of merged.split('\n')) {
+    const name = line.trim();
+    if (!excluded(name)) hydraHeads.add(name);
+  }
+  return hydraHeads.size;
 }
 
 /**
@@ -1979,6 +2110,8 @@ function normalizeDeveloper(saved: Partial<ProgrammerStats>): ProgrammerStats {
     activeErrorCount: saved.activeErrorCount === undefined ? 0 : saved.activeErrorCount,
     mergeConflictCount: saved.mergeConflictCount === undefined ? 0 : saved.mergeConflictCount,
     longFileCount: saved.longFileCount === undefined ? 0 : saved.longFileCount,
+    longFunctionCount: saved.longFunctionCount === undefined ? 0 : saved.longFunctionCount,
+    staleBranchCount: saved.staleBranchCount === undefined ? 0 : saved.staleBranchCount,
     prestigeCount: saved.prestigeCount === undefined ? 0 : saved.prestigeCount,
     lastSponsorClickAt: saved.lastSponsorClickAt === undefined ? 0 : saved.lastSponsorClickAt,
     lastYearlyRecapAt: saved.lastYearlyRecapAt === undefined ? Date.now() : saved.lastYearlyRecapAt,
@@ -2062,6 +2195,8 @@ class DeveloperManager {
   private lastErrorCount: number = 0;
   private lastConflictCount: number = 0;
   private lastLongFileCount: number = 0;
+  private lastLongFunctionCount: number = 0;
+  private lastStaleBranchCount: number = 0;
   private lastErrorIncreaseAt: number = 0; // Timestamp a lint/build error last appeared — drives the secret "Quick Draw" achievement
   private lastActivityAt: number = Date.now(); // Last real editor activity — drives idle detection (see recordActivity/isIdle)
   private promptShownThisSession = false; // Set by the sponsor ask so the review ask never stacks on top of it
@@ -3229,50 +3364,112 @@ class DeveloperManager {
     this.saveDeveloper();
   }
 
-  setInitialLongFileCount(count: number) {
-    this.lastLongFileCount = count;
-    this.developer.longFileCount = count;
+  setInitialCodeSmellCounts(longFiles: number, longFunctions: number) {
+    this.lastLongFileCount = longFiles;
+    this.lastLongFunctionCount = longFunctions;
+    this.developer.longFileCount = longFiles;
+    this.developer.longFunctionCount = longFunctions;
   }
 
   /**
    * Live "Code Smell Boss" HP is the count of currently-open files over
-   * LONG_FILE_LINE_THRESHOLD lines (see countOpenLongFiles) — same
-   * "actual repo state as boss HP" pattern as the Bug Boss and Merge
-   * Conflict Kraken above. Deliberately scoped to files VS Code already has
-   * open/loaded (free via TextDocument.lineCount, no disk I/O) rather than
+   * LONG_FILE_LINE_THRESHOLD lines (see countOpenLongFiles) plus the count of
+   * functions/methods over LONG_FUNCTION_LINE_THRESHOLD lines in those open
+   * files (see countLongFunctionsInDocument) — same "actual repo state as
+   * boss HP" pattern as the Bug Boss and Merge Conflict Kraken above.
+   * Deliberately scoped to files VS Code already has open/loaded rather than
    * scanning the whole workspace — honest about what it can see, and cheap
-   * enough to recheck on every open/close/save without a debounce.
+   * enough to recheck on every open/close/save without a debounce. The two
+   * halves pay out separately but share one HP pool, so the boss is only
+   * defeated once both are cleared.
    */
-  updateLongFileCount(currentCount: number) {
-    const diff = currentCount - this.lastLongFileCount;
-    const previousCount = this.lastLongFileCount;
+  updateCodeSmellCounts(longFiles: number, longFunctions: number) {
+    const fileDiff = longFiles - this.lastLongFileCount;
+    const functionDiff = longFunctions - this.lastLongFunctionCount;
+    const previousTotal = this.lastLongFileCount + this.lastLongFunctionCount;
+    const currentTotal = longFiles + longFunctions;
+    if (fileDiff === 0 && functionDiff === 0) return; // Rechecked on every editor switch — skip the save when nothing moved
 
-    if (diff < 0) {
-      const shrunk = Math.abs(diff);
+    if (fileDiff < 0) {
+      const shrunk = Math.abs(fileDiff);
       this.addXP(shrunk * CODE_SMELL_REFACTOR_XP_PER_FILE);
       this.developer.motivation = Math.min(100, this.developer.motivation + shrunk * 3);
       this.addLog(`🧟 Refactored ${shrunk} bloated file${shrunk > 1 ? 's' : ''} under ${LONG_FILE_LINE_THRESHOLD} lines  +${shrunk * CODE_SMELL_REFACTOR_XP_PER_FILE} XP`, 'xp');
+    }
+    if (functionDiff < 0) {
+      const split = Math.abs(functionDiff);
+      this.addXP(split * CODE_SMELL_REFACTOR_XP_PER_FUNCTION);
+      this.developer.motivation = Math.min(100, this.developer.motivation + split * 2);
+      this.addLog(`🧟 Broke up ${split} long function${split > 1 ? 's' : ''} under ${LONG_FUNCTION_LINE_THRESHOLD} lines  +${split * CODE_SMELL_REFACTOR_XP_PER_FUNCTION} XP`, 'xp');
+    }
 
-      // Code Smell Boss defeated: every open file just dropped under the threshold.
+    // Code Smell Boss defeated: no bloated file or long function left open.
+    if (currentTotal === 0 && previousTotal > 0) {
+      const xpBonus = this.applyBossBonusAffix(CODE_SMELL_BOSS_DEFEAT_BONUS_XP);
+      const coffeeBonus = this.applyBossBonusAffix(CODE_SMELL_BOSS_DEFEAT_BONUS_COFFEE);
+      this.addXP(xpBonus);
+      this.developer.coffee += coffeeBonus;
+      this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + coffeeBonus;
+      this.developer.totalBossesDefeated = (this.developer.totalBossesDefeated || 0) + 1;
+      this.addLog(`🧟 Code Smell Boss defeated! +${xpBonus} XP, +${coffeeBonus} ☕`, 'achievement');
+      vscode.window.showInformationMessage(
+        `🧟 Code Smell Boss defeated! +${xpBonus} XP, +${coffeeBonus} ☕ — nothing bloated left open.`
+      );
+    }
+
+    const grew = Math.max(0, fileDiff) + Math.max(0, functionDiff);
+    if (grew > 0) {
+      // A file/function just grew past its threshold (or a bloated file got opened) - slight focus hit
+      this.developer.focus = Math.max(0, this.developer.focus - grew);
+    }
+
+    this.lastLongFileCount = longFiles;
+    this.lastLongFunctionCount = longFunctions;
+    this.developer.longFileCount = longFiles;
+    this.developer.longFunctionCount = longFunctions;
+    this.saveDeveloper();
+  }
+
+  setInitialStaleBranchCount(count: number) {
+    this.lastStaleBranchCount = count;
+    this.developer.staleBranchCount = count;
+  }
+
+  /**
+   * Live "Stale Branch Hydra" HP is the count of merged-but-undeleted or
+   * long-untouched local branches (see countStaleBranches) — same "actual
+   * repo state as boss HP" pattern as the other three bosses. The extension
+   * never prunes anything itself; the player deletes branches with their own
+   * git commands, same as fixing bugs or resolving conflicts by hand.
+   */
+  updateStaleBranchCount(currentCount: number) {
+    const diff = currentCount - this.lastStaleBranchCount;
+    const previousCount = this.lastStaleBranchCount;
+    if (diff === 0) return; // Fires on every repo state change — skip the save when nothing moved
+
+    if (diff < 0) {
+      const pruned = Math.abs(diff);
+      this.addXP(pruned * STALE_BRANCH_PRUNE_XP_PER_BRANCH);
+      this.developer.motivation = Math.min(100, this.developer.motivation + pruned);
+      this.addLog(`🐍 Pruned ${pruned} stale branch${pruned > 1 ? 'es' : ''}  +${pruned * STALE_BRANCH_PRUNE_XP_PER_BRANCH} XP`, 'xp');
+
+      // Stale Branch Hydra defeated: every stale/merged local branch just got pruned.
       if (currentCount === 0 && previousCount > 0) {
-        const xpBonus = this.applyBossBonusAffix(CODE_SMELL_BOSS_DEFEAT_BONUS_XP);
-        const coffeeBonus = this.applyBossBonusAffix(CODE_SMELL_BOSS_DEFEAT_BONUS_COFFEE);
+        const xpBonus = this.applyBossBonusAffix(STALE_BRANCH_HYDRA_DEFEAT_BONUS_XP);
+        const coffeeBonus = this.applyBossBonusAffix(STALE_BRANCH_HYDRA_DEFEAT_BONUS_COFFEE);
         this.addXP(xpBonus);
         this.developer.coffee += coffeeBonus;
         this.developer.totalCoffeeEarned = (this.developer.totalCoffeeEarned || 0) + coffeeBonus;
         this.developer.totalBossesDefeated = (this.developer.totalBossesDefeated || 0) + 1;
-        this.addLog(`🧟 Code Smell Boss defeated! +${xpBonus} XP, +${coffeeBonus} ☕`, 'achievement');
+        this.addLog(`🐍 Stale Branch Hydra defeated! +${xpBonus} XP, +${coffeeBonus} ☕`, 'achievement');
         vscode.window.showInformationMessage(
-          `🧟 Code Smell Boss defeated! +${xpBonus} XP, +${coffeeBonus} ☕ — nothing bloated left open.`
+          `🐍 Stale Branch Hydra defeated! +${xpBonus} XP, +${coffeeBonus} ☕ — your branch list is clean.`
         );
       }
-    } else if (diff > 0) {
-      // A file just grew past the threshold (or a bloated file got opened) - slight focus hit
-      this.developer.focus = Math.max(0, this.developer.focus - diff);
     }
 
-    this.lastLongFileCount = currentCount;
-    this.developer.longFileCount = currentCount;
+    this.lastStaleBranchCount = currentCount;
+    this.developer.staleBranchCount = currentCount;
     this.saveDeveloper();
   }
 
@@ -4346,8 +4543,9 @@ class DeveloperPanel {
     }
 
     /* Code Smell Boss mode — swaps in when open files are bloated past
-       LONG_FILE_LINE_THRESHOLD lines; lowest priority of the three "real"
-       bosses since it's a non-blocking chore, not an active error state. */
+       LONG_FILE_LINE_THRESHOLD lines or hold functions past
+       LONG_FUNCTION_LINE_THRESHOLD; a non-blocking chore, not an active
+       error state, so only the Hydra ranks below it. */
     #bossCard.smell-mode {
       border-color: #0a3a1a;
       box-shadow: 0 0 10px rgba(0,230,118,0.12);
@@ -4359,6 +4557,28 @@ class DeveloperPanel {
       background: linear-gradient(90deg, #005e2e, var(--neon-green));
       box-shadow: 0 0 8px var(--neon-green);
     }
+
+    /* Stale Branch Hydra mode — swaps in when the repo has merged-but-
+       undeleted or long-untouched local branches; lowest priority of the
+       four "real" bosses since branch hygiene never blocks anything. */
+    #bossCard.hydra-mode {
+      border-color: #4a0a4a;
+      box-shadow: 0 0 10px rgba(224,64,251,0.12);
+    }
+    #bossCard.hydra-mode .boss-title { color: var(--neon-pink); }
+    #bossCard.hydra-mode .boss-name { color: #f08cff; }
+    #bossCard.hydra-mode .boss-track { border-color: #4a0a4a; }
+    #bossCard.hydra-mode .boss-hp-fill {
+      background: linear-gradient(90deg, #5e005e, var(--neon-pink));
+      box-shadow: 0 0 8px var(--neon-pink);
+    }
+
+    /* Boss pixel avatar — drawn by drawBossSprite() at 3 canvas px per
+       logical pixel, same as the character sprite in the scene. */
+    .boss-head { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+    .boss-head-text { flex: 1; min-width: 0; }
+    .boss-head-text .boss-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #bossSpriteCanvas { flex: none; width: 48px; height: 48px; image-rendering: pixelated; }
 
     /* ── FOCUS SPRINT ── */
     .focus-card {
@@ -4502,6 +4722,7 @@ class DeveloperPanel {
     /* ── BOSS BATTLE (in challenge) ── */
     .boss-container { text-align: center; padding: 10px 0; }
     .boss-sprite { font-size: 72px; margin-bottom: 8px; transition: transform 0.1s; display: inline-block; }
+    canvas.boss-sprite { width: 96px; height: 96px; image-rendering: pixelated; }
     .boss-hp-bar {
       width: 100%; height: 16px;
       background: #1a1a30;
@@ -4998,8 +5219,13 @@ class DeveloperPanel {
             <div class="quest-pct" id="activeQuestPct">—</div>
           </div>
           <div class="mini-card" id="bossCard">
-            <div class="boss-title" id="bossTitleDisplay">☠ Burnout Boss</div>
-            <div class="boss-name" id="bossNameDisplay">Overwhelmulus</div>
+            <div class="boss-head">
+              <div class="boss-head-text">
+                <div class="boss-title" id="bossTitleDisplay">☠ Burnout Boss</div>
+                <div class="boss-name" id="bossNameDisplay">Overwhelmulus</div>
+              </div>
+              <canvas id="bossSpriteCanvas" width="48" height="48"></canvas>
+            </div>
             <div class="boss-track"><div id="bossHealthBar" class="boss-hp-fill" style="width:60%"></div></div>
             <div class="boss-hp-text" id="bossHealthText">300 / 500 HP</div>
           </div>
@@ -5559,7 +5785,10 @@ class DeveloperPanel {
         function backToMenu() { 
           document.getElementById('challengeMenu').style.display = 'grid';
           document.getElementById('challengeArea').style.display = 'none';
-          if (currentChallenge) clearInterval(currentChallenge.interval);
+          if (currentChallenge) {
+            clearInterval(currentChallenge.interval);
+            if (currentChallenge.animInterval) clearInterval(currentChallenge.animInterval);
+          }
         }
 
         function showSkills() {
@@ -5895,15 +6124,19 @@ class DeveloperPanel {
 
             // Boss card: Merge Conflict Kraken takes priority (a live conflict
             // blocks work), then Bug Boss (active lint/build errors), then
-            // Code Smell Boss (bloated open files — a non-blocking chore, so
-            // it only shows once nothing more urgent is going on), otherwise
-            // falls back to the burnout-derived boss.
+            // Code Smell Boss (bloated open files/functions — a non-blocking chore, so
+            // it only shows once nothing more urgent is going on), then
+            // Stale Branch Hydra (branch hygiene, the least urgent of all),
+            // otherwise falls back to the burnout-derived boss.
             const bossCard = document.getElementById('bossCard');
             const activeErrors = dev.activeErrorCount || 0;
             const conflicts = dev.mergeConflictCount || 0;
             const longFiles = dev.longFileCount || 0;
+            const longFunctions = dev.longFunctionCount || 0;
+            const smells = longFiles + longFunctions;
+            const staleBranches = dev.staleBranchCount || 0;
             if (conflicts > 0) {
-              bossCard.classList.remove('bug-mode', 'smell-mode');
+              bossCard.classList.remove('bug-mode', 'smell-mode', 'hydra-mode');
               bossCard.classList.add('kraken-mode');
               document.getElementById('bossTitleDisplay').textContent = '🐙 Merge Conflict Kraken';
               let bossName = 'Conflict Tentacle';
@@ -5915,7 +6148,7 @@ class DeveloperPanel {
               document.getElementById('bossHealthBar').style.width = krakenPct + '%';
               document.getElementById('bossHealthText').textContent = conflicts + ' conflict' + (conflicts === 1 ? '' : 's') + ' remaining';
             } else if (activeErrors > 0) {
-              bossCard.classList.remove('kraken-mode', 'smell-mode');
+              bossCard.classList.remove('kraken-mode', 'smell-mode', 'hydra-mode');
               bossCard.classList.add('bug-mode');
               document.getElementById('bossTitleDisplay').textContent = '🐛 Bug Boss';
               let bossName = 'Syntax Wraith';
@@ -5926,20 +6159,35 @@ class DeveloperPanel {
               const bugPct = Math.min(100, activeErrors * 20);
               document.getElementById('bossHealthBar').style.width = bugPct + '%';
               document.getElementById('bossHealthText').textContent = activeErrors + ' error' + (activeErrors === 1 ? '' : 's') + ' remaining';
-            } else if (longFiles > 0) {
-              bossCard.classList.remove('kraken-mode', 'bug-mode');
+            } else if (smells > 0) {
+              bossCard.classList.remove('kraken-mode', 'bug-mode', 'hydra-mode');
               bossCard.classList.add('smell-mode');
               document.getElementById('bossTitleDisplay').textContent = '🧟 Code Smell Boss';
               let bossName = 'Spaghetti Sprite';
-              if (longFiles >= 11) bossName = 'Technical Debt Titan';
-              else if (longFiles >= 6) bossName = 'Legacy Behemoth';
-              else if (longFiles >= 3) bossName = 'Code Smell Ooze';
+              if (smells >= 11) bossName = 'Technical Debt Titan';
+              else if (smells >= 6) bossName = 'Legacy Behemoth';
+              else if (smells >= 3) bossName = 'Code Smell Ooze';
               document.getElementById('bossNameDisplay').textContent = bossName;
-              const smellPct = Math.min(100, longFiles * 20);
+              const smellPct = Math.min(100, smells * 20);
               document.getElementById('bossHealthBar').style.width = smellPct + '%';
-              document.getElementById('bossHealthText').textContent = longFiles + ' bloated file' + (longFiles === 1 ? '' : 's') + ' open (300+ lines)';
+              const smellParts = [];
+              if (longFiles > 0) smellParts.push(longFiles + ' bloated file' + (longFiles === 1 ? '' : 's') + ' (300+ lines)');
+              if (longFunctions > 0) smellParts.push(longFunctions + ' long function' + (longFunctions === 1 ? '' : 's') + ' (200+ lines)');
+              document.getElementById('bossHealthText').textContent = smellParts.join(' · ');
+            } else if (staleBranches > 0) {
+              bossCard.classList.remove('kraken-mode', 'bug-mode', 'smell-mode');
+              bossCard.classList.add('hydra-mode');
+              document.getElementById('bossTitleDisplay').textContent = '🐍 Stale Branch Hydra';
+              let bossName = 'Branch Hatchling';
+              if (staleBranches >= 11) bossName = 'Hydra of a Thousand Refs';
+              else if (staleBranches >= 6) bossName = 'Many-Headed Monorepo';
+              else if (staleBranches >= 3) bossName = 'Stale Branch Hydra';
+              document.getElementById('bossNameDisplay').textContent = bossName;
+              const hydraPct = Math.min(100, staleBranches * 20);
+              document.getElementById('bossHealthBar').style.width = hydraPct + '%';
+              document.getElementById('bossHealthText').textContent = staleBranches + ' stale branch' + (staleBranches === 1 ? '' : 'es') + ' — prune one to deal damage';
             } else {
-              bossCard.classList.remove('bug-mode', 'kraken-mode', 'smell-mode');
+              bossCard.classList.remove('bug-mode', 'kraken-mode', 'smell-mode', 'hydra-mode');
               document.getElementById('bossTitleDisplay').textContent = '☠ Burnout Boss';
               document.getElementById('bossNameDisplay').textContent = 'Overwhelmulus';
               const bossMaxHp = 500;
@@ -5947,6 +6195,7 @@ class DeveloperPanel {
               document.getElementById('bossHealthBar').style.width = (dev.health) + '%';
               document.getElementById('bossHealthText').textContent = bossHp + ' / ' + bossMaxHp + ' HP';
             }
+            updateBossSprite(prevDev, dev);
 
             if(document.getElementById('skillsModal').classList.contains('active')) renderSkills();
             if(document.getElementById('shopModal').classList.contains('active')) renderShop();
@@ -6085,7 +6334,7 @@ class DeveloperPanel {
             "await Promise.all([]);", "class Monster extends Bug {}"
           ];
           
-          area.innerHTML = '<div class="boss-container"><div class="timer" id="bossTimer">TIME: ' + time + 's</div><div class="boss-hp-bar"><div id="bossHp" class="boss-hp-fill-game" style="width:100%"></div></div><div id="bossSprite" class="boss-sprite">👾</div><div style="font-size:11px;letter-spacing:2px;color:var(--text-dim);margin-bottom:8px;">TYPE TO ATTACK:</div><div id="bossCode" class="code-snippet"></div><input id="bossInput" class="challenge-input" placeholder="Type code..." autocomplete="off"></div>';
+          area.innerHTML = '<div class="boss-container"><div class="timer" id="bossTimer">TIME: ' + time + 's</div><div class="boss-hp-bar"><div id="bossHp" class="boss-hp-fill-game" style="width:100%"></div></div><canvas id="bossSprite" class="boss-sprite" width="96" height="96"></canvas><div style="font-size:11px;letter-spacing:2px;color:var(--text-dim);margin-bottom:8px;">TYPE TO ATTACK:</div><div id="bossCode" class="code-snippet"></div><input id="bossInput" class="challenge-input" placeholder="Type code..." autocomplete="off"></div>';
           
           const input = document.getElementById('bossInput');
           const codeDisplay = document.getElementById('bossCode');
@@ -6095,12 +6344,33 @@ class DeveloperPanel {
           let currentSnippet = snippets[Math.floor(Math.random() * snippets.length)];
           codeDisplay.textContent = currentSnippet;
           input.focus();
-          
+
+          // Same Bug Boss sprite as the boss card, at double size and a
+          // faster idle loop — it's a live fight, not a status card.
+          let spriteFrame = 0;
+          let spriteFlashUntil = 0;
+          let spritePoof = null;
+          const drawFightSprite = () => {
+            if (spritePoof) {
+              if (drawBossPoof(sprite, spritePoof, 6)) return;
+              spritePoof = null;
+              sprite.getContext('2d').clearRect(0, 0, sprite.width, sprite.height);
+              return;
+            }
+            drawBossSprite(sprite, 'bug', spriteFrame, 1, 0, Date.now() < spriteFlashUntil ? '#ffffff' : null, 6);
+          };
+          drawFightSprite();
+          const animInterval = setInterval(() => {
+            if (!bossReduceMotion) spriteFrame = spriteFrame ? 0 : 1;
+            drawFightSprite();
+          }, bossReduceMotion ? 100 : 250);
+
           const interval = setInterval(() => {
             time--;
             document.getElementById('bossTimer').textContent = 'Time: ' + time + 's';
             if (time <= 0) {
               clearInterval(interval);
+              clearInterval(animInterval);
               area.innerHTML = '<h3>Game Over! 💀</h3><p>The bug monster escaped.</p>';
               setTimeout(() => backToMenu(), 2000);
             }
@@ -6110,17 +6380,26 @@ class DeveloperPanel {
             if (input.value === currentSnippet) {
               bossHp -= 20;
               hpBar.style.width = bossHp + '%';
-              sprite.classList.remove('shake');
-              void sprite.offsetWidth; 
-              sprite.classList.add('shake');
+              spriteFlashUntil = Date.now() + BOSS_FLASH_MS;
+              shakeElement(sprite);
               input.value = '';
               
               if (bossHp <= 0) {
                 clearInterval(interval);
                 score = 100 + (time * 10);
-                area.innerHTML = '<h3>Victory! 🏆</h3><p>Bug Monster defeated!</p>';
                 vscode.postMessage({ command: 'challenge-completed', score });
-                setTimeout(() => backToMenu(), 2000);
+                input.disabled = true;
+                // Let the defeat burst play out on the sprite before the
+                // victory screen replaces it.
+                if (!bossReduceMotion) spritePoof = makeBossPoof('bug', 1);
+                const poofMs = bossReduceMotion ? 0 : BOSS_POOF_MS;
+                const animFast = setInterval(drawFightSprite, 30);
+                setTimeout(() => {
+                  clearInterval(animFast);
+                  clearInterval(animInterval);
+                  area.innerHTML = '<h3>Victory! 🏆</h3><p>Bug Monster defeated!</p>';
+                  setTimeout(() => backToMenu(), 2000);
+                }, poofMs);
               } else {
                 currentSnippet = snippets[Math.floor(Math.random() * snippets.length)];
                 codeDisplay.textContent = currentSnippet;
@@ -6128,7 +6407,7 @@ class DeveloperPanel {
             }
           };
           
-          currentChallenge = { interval };
+          currentChallenge = { interval, animInterval };
         }
         // ── PIXEL ART SCENE CANVAS ────────────────────────────────────────
         function roundRect(ctx, x, y, w, h, r) {
@@ -6241,6 +6520,395 @@ class DeveloperPanel {
             ctx.fillStyle = '#142514'; ctx.beginPath(); ctx.arc(fx - 4, fy - 4, fr * 0.38, 0, Math.PI * 2); ctx.fill();
           });
         }
+
+        // ── Boss pixel avatars ──
+        // Same letter-grid sprite format as drawCharacter below: each 16x16
+        // frame is rows of palette keys, painted at 3 canvas px per logical
+        // pixel onto the 48x48 boss card canvas. Two frames per boss make
+        // the idle loop; the Hydra is composed at draw time instead (see
+        // composeHydra) so it can grow a head per stale branch.
+        const BOSS_SPRITES = {
+          bug: {
+            glow: '255,215,64',
+            palette: { O: '#8a6a10', D: '#7a5a00', B: '#ffd740', b: '#fff0b0', E: '#ff1744', R: '#3a0000' },
+            frames: [[
+              '   O        O   ',
+              '    O      O    ',
+              '     OOOOOO     ',
+              '    ODDDDDDO    ',
+              '   ODEEDDEEDO   ',
+              '   ODDDRRDDDO   ',
+              ' O  OOOOOOOO  O ',
+              '  OOBBBbbBBBOO  ',
+              '   OBBBbbBBBO   ',
+              ' OOBBBBbbBBBBOO ',
+              'O  OBBBbbBBBO  O',
+              '  OBBBBbbBBBBO  ',
+              ' OOOBBBbbBBBOOO ',
+              'O   OBBbbBBO   O',
+              '     OOOOOO     ',
+              '                ',
+            ], [
+              '  O          O  ',
+              '   OO      OO   ',
+              '     OOOOOO     ',
+              '    ODDDDDDO    ',
+              '   ODEEDDEEDO   ',
+              '   ODDDRRDDDO   ',
+              'O   OOOOOOOO   O',
+              ' OOOBBBbbBBBOOO ',
+              '   OBBBbbBBBO   ',
+              'O OBBBBbbBBBBO O',
+              ' OOOBBBbbBBBOOO ',
+              '  OBBBBbbBBBBO  ',
+              'O  OBBBbbBBBO  O',
+              ' O  OBBbbBBO  O ',
+              '     OOOOOO     ',
+              '                ',
+            ]]
+          },
+          kraken: {
+            glow: '0,229,255',
+            palette: { O: '#0a6a80', B: '#00a8c0', b: '#6fe0ff', W: '#ffffff', E: '#021820', R: '#ff4081' },
+            frames: [[
+              '                ',
+              '     OOOOOO     ',
+              '   OOBBBBBBOO   ',
+              '  OBBbbBBBBBBO  ',
+              '  OBbbBBBBBBBO  ',
+              ' OBBBBBBBBBBBBO ',
+              ' OBWWBBBBBBWWBO ',
+              ' OBWEBBBBBBWEBO ',
+              ' OBBBBBRRBBBBBO ',
+              '  OBBBBBBBBBBO  ',
+              ' OBOBBOBBOBBOBO ',
+              ' OBO OBOOBO OBO ',
+              'OBO  OBOOBO  OBO',
+              'OBO OBO  OBO OBO',
+              ' OO OO    OO OO ',
+              '                ',
+            ], [
+              '                ',
+              '     OOOOOO     ',
+              '   OOBBBBBBOO   ',
+              '  OBBbbBBBBBBO  ',
+              '  OBbbBBBBBBBO  ',
+              ' OBBBBBBBBBBBBO ',
+              ' OBWWBBBBBBWWBO ',
+              ' OBEWBBBBBBEWBO ',
+              ' OBBBBBRRBBBBBO ',
+              '  OBBBBBBBBBBO  ',
+              ' OBOBBOBBOBBOBO ',
+              '  OBOOBOOBOOBO  ',
+              '  OBO OBOBO OBO ',
+              ' OBO  OBOBO  OBO',
+              ' OO    OO     OO',
+              '                ',
+            ]]
+          },
+          smell: {
+            glow: '0,230,118',
+            palette: { O: '#0a7a3a', D: '#007a3a', B: '#00c060', b: '#6fffa8', E: '#0a1a10', W: '#ffffff', S: '#a8a850', R: '#3a0a1a' },
+            frames: [[
+              '   S    S   S   ',
+              '    S  S   S    ',
+              '   S    S   S   ',
+              '                ',
+              '      OOOO      ',
+              '    OObbBBOO    ',
+              '   ObbBBBBBBO   ',
+              '  ObBBBBBBBBBO  ',
+              '  OBWEBBBBWEBO  ',
+              ' OBBWWBBBBWWBBO ',
+              ' OBBBBRRRRBBBBO ',
+              ' OBBBBBRRBBBBBO ',
+              'OBBBBBBBBBBBBBBO',
+              'ODBBDBBBBBDBBDBO',
+              ' OODOOOOOOODOO  ',
+              '    O      O    ',
+            ], [
+              '    S   S    S  ',
+              '   S   S    S   ',
+              '    S   S    S  ',
+              '                ',
+              '                ',
+              '      OOOO      ',
+              '   OOObbBBOOO   ',
+              '  ObbBBBBBBBBO  ',
+              ' ObBWEBBBBWEBBO ',
+              ' OBBWWBBBBWWBBO ',
+              'OBBBBBRRRRBBBBBO',
+              'OBBBBBBRRBBBBBBO',
+              'OBBBBBBBBBBBBBBO',
+              'ODBBDBBBBBDBBDBO',
+              ' OODOOOOOOODOOO ',
+              '   O       O    ',
+            ]]
+          },
+          hydra: {
+            glow: '224,64,251',
+            palette: { O: '#7a1a8a', D: '#6a1080', B: '#c030e0', b: '#f08cff', E: '#ffd740', R: '#ff1744' },
+            head: [
+              ' OOOO  ',
+              'OBbBEO ',
+              'OBBBBOR',
+              ' OOOO  ',
+            ],
+            body: [
+              '   OOOOOOOOOO   ',
+              '  OBBbbbbbbBBO  ',
+              ' OBBBbbbbbbBBBO ',
+              ' OBBBBBBBBBBBBO ',
+              '  ODBBDBBDBBDO  ',
+              '   OO OO OO OO  ',
+            ]
+          },
+          burnout: {
+            glow: '255,23,68',
+            palette: { O: '#7a1010', W: '#e8e0d0', w: '#a89f90', E: '#ff1744', F: '#ff6d00', f: '#ffd740' },
+            frames: [[
+              '  F    F   F    ',
+              ' FfF  FfF FfF   ',
+              ' FfF FFfFFFfF F ',
+              '  FFFfffFFfFFFfF',
+              '    OWWWWWWO FF ',
+              '   OWWWWWWWWO   ',
+              '  OWWWWWWWWWWO  ',
+              '  OWOOOWWOOOWO  ',
+              '  OWOEOWWOEOWO  ',
+              '  OWOOOWWOOOWO  ',
+              '  OWWWWOOWWWWO  ',
+              '   OwWWWWWWwO   ',
+              '    OWOWOWOO    ',
+              '    OWOWOWOO    ',
+              '     OwwwwO     ',
+              '      OOOO      ',
+            ], [
+              '    F   F    F  ',
+              '   FfF FfF  FfF ',
+              ' F FfFFFfF FFfF ',
+              'FfFFFfFFffFFfFF ',
+              ' FF OWWWWWWO    ',
+              '   OWWWWWWWWO   ',
+              '  OWWWWWWWWWWO  ',
+              '  OWOOOWWOOOWO  ',
+              '  OWOEOWWOEOWO  ',
+              '  OWOOOWWOOOWO  ',
+              '  OWWWWOOWWWWO  ',
+              '   OwWWWWWWwO   ',
+              '    OOWOWOWO    ',
+              '    OOWOWOWO    ',
+              '     OwwwwO     ',
+              '      OOOO      ',
+            ]]
+          }
+        };
+
+        // One head per stale branch, capped at 3 so it still reads at 16px.
+        // Side heads face outward; heads bob on alternating frames so the
+        // idle loop reads as swaying necks.
+        function composeHydra(heads, frame) {
+          const grid = [];
+          for (let y = 0; y < 16; y++) grid.push(new Array(16).fill(' '));
+          const head = BOSS_SPRITES.hydra.head;
+          BOSS_SPRITES.hydra.body.forEach((row, y) => {
+            for (let x = 0; x < 16; x++) if (row[x] !== ' ') grid[10 + y][x] = row[x];
+          });
+          // [head x, head y, faces left]
+          const slots = heads >= 3 ? [[0, 3, true], [5, 0, false], [9, 3, false]]
+            : heads === 2 ? [[1, 2, true], [8, 2, false]]
+            : [[5, 1, false]];
+          slots.forEach(([hx, hy, facesLeft], i) => {
+            const y0 = hy + ((i + frame) % 2);
+            const neckX = hx + 2;
+            for (let y = y0 + 4; y < 11; y++) {
+              grid[y][neckX] = 'O'; grid[y][neckX + 1] = 'B'; grid[y][neckX + 2] = 'O';
+            }
+            head.forEach((row, y) => {
+              for (let x = 0; x < row.length; x++) {
+                const key = facesLeft ? row[row.length - 1 - x] : row[x];
+                const gx = hx + x - (facesLeft ? 1 : 0);
+                if (key !== ' ' && gx >= 0 && gx < 16) grid[y0 + y][gx] = key;
+              }
+            });
+          });
+          return grid.map(r => r.join(''));
+        }
+
+        function getBossGrid(kind, frame, heads) {
+          return kind === 'hydra' ? composeHydra(heads, frame) : BOSS_SPRITES[kind].frames[frame % 2];
+        }
+
+        // Which boss the card is showing — mirrors the priority chain in the
+        // 'update' handler. count is the boss's live HP (0 for Burnout Boss,
+        // whose HP is health, not a damage-able count).
+        function getShownBoss(dev) {
+          if ((dev.mergeConflictCount || 0) > 0) return { kind: 'kraken', count: dev.mergeConflictCount };
+          if ((dev.activeErrorCount || 0) > 0) return { kind: 'bug', count: dev.activeErrorCount };
+          const smells = (dev.longFileCount || 0) + (dev.longFunctionCount || 0);
+          if (smells > 0) return { kind: 'smell', count: smells };
+          if ((dev.staleBranchCount || 0) > 0) return { kind: 'hydra', count: dev.staleBranchCount };
+          return { kind: 'burnout', count: 0 };
+        }
+        // Live HP of one specific boss, whether or not it's the one shown
+        // (null for Burnout Boss, which has no count).
+        function getBossCount(dev, kind) {
+          if (kind === 'kraken') return dev.mergeConflictCount || 0;
+          if (kind === 'bug') return dev.activeErrorCount || 0;
+          if (kind === 'smell') return (dev.longFileCount || 0) + (dev.longFunctionCount || 0);
+          if (kind === 'hydra') return dev.staleBranchCount || 0;
+          return null;
+        }
+
+        // Same 3 / 6 / 11 thresholds the boss names step up at.
+        function getBossTier(count) {
+          return count >= 11 ? 3 : count >= 6 ? 2 : count >= 3 ? 1 : 0;
+        }
+
+        const BOSS_SPRITE_P = 3;
+        const BOSS_FLASH_MS = 160;
+        const BOSS_STRIKE_MS = 450; // Burnout Boss's red "strike" flash when you burn out
+        const BOSS_POOF_MS = 700;
+        const bossReduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        let bossSprite = { kind: 'burnout', heads: 1, tier: 0 };
+        let bossSpriteFrame = 0;
+        let bossFlashUntil = 0;
+        let bossFlashColor = '#ffffff';
+        let bossPoof = null; // { particles, startedAt } while a defeat burst is playing
+        let bossFxRaf = 0;
+
+        // flashColor paints every pixel one solid color (null = normal
+        // palette); P is canvas px per logical pixel (the typing mini-game
+        // draws the same sprites at double size).
+        function drawBossSprite(canvas, kind, frame, heads, tier, flashColor, P) {
+          const ctx = canvas.getContext('2d');
+          P = P || BOSS_SPRITE_P;
+          const def = BOSS_SPRITES[kind];
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          // Higher HP tiers glow harder behind the sprite
+          if (tier > 0) {
+            const cx = canvas.width / 2, cy = canvas.height * 0.54, r = canvas.width * 0.54;
+            const g = ctx.createRadialGradient(cx, cy, P, cx, cy, r);
+            g.addColorStop(0, 'rgba(' + def.glow + ',' + (0.12 * tier) + ')');
+            g.addColorStop(1, 'rgba(' + def.glow + ',0)');
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+          }
+          getBossGrid(kind, frame, heads).forEach((row, y) => {
+            for (let x = 0; x < row.length; x++) {
+              const col = def.palette[row[x]];
+              if (!col) continue;
+              ctx.fillStyle = flashColor || col;
+              ctx.fillRect(x * P, y * P, P, P);
+            }
+          });
+        }
+
+        // Defeat burst: every pixel of the beaten boss flies outward from the
+        // center and fades over BOSS_POOF_MS.
+        function makeBossPoof(kind, heads) {
+          const def = BOSS_SPRITES[kind];
+          const particles = [];
+          getBossGrid(kind, 0, heads).forEach((row, y) => {
+            for (let x = 0; x < row.length; x++) {
+              const col = def.palette[row[x]];
+              if (!col) continue;
+              const dx = x - 7.5, dy = y - 7.5;
+              const len = Math.sqrt(dx * dx + dy * dy) || 1;
+              const speed = 10 + Math.random() * 18; // logical px per second
+              particles.push({ x: x, y: y, vx: dx / len * speed, vy: dy / len * speed - 6, col: col });
+            }
+          });
+          return { particles: particles, startedAt: Date.now() };
+        }
+
+        // Draws one frame of a poof; returns false once it has finished.
+        function drawBossPoof(canvas, poof, P) {
+          const t = (Date.now() - poof.startedAt) / 1000;
+          if (t * 1000 >= BOSS_POOF_MS) return false;
+          const ctx = canvas.getContext('2d');
+          P = P || BOSS_SPRITE_P;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.globalAlpha = Math.max(0, 1 - (t * 1000) / BOSS_POOF_MS);
+          poof.particles.forEach(p => {
+            ctx.fillStyle = p.col;
+            ctx.fillRect(Math.round((p.x + p.vx * t) * P), Math.round((p.y + p.vy * t + 20 * t * t) * P), P, P);
+          });
+          ctx.globalAlpha = 1;
+          return true;
+        }
+
+        function shakeElement(el) {
+          if (!el || bossReduceMotion) return;
+          el.classList.remove('shake');
+          void el.offsetWidth;
+          el.classList.add('shake');
+        }
+
+        function renderBossSprite() {
+          const canvas = document.getElementById('bossSpriteCanvas');
+          if (!canvas) return;
+          if (bossPoof) {
+            if (drawBossPoof(canvas, bossPoof)) return;
+            bossPoof = null;
+          }
+          const flashColor = Date.now() < bossFlashUntil ? bossFlashColor : null;
+          drawBossSprite(canvas, bossSprite.kind, bossSpriteFrame, bossSprite.heads, bossSprite.tier, flashColor);
+        }
+
+        // Runs only while a flash or poof is playing; the idle loop below
+        // handles the slow two-frame animation the rest of the time.
+        function runBossFx() {
+          if (bossFxRaf) return;
+          const step = () => {
+            renderBossSprite();
+            if (bossPoof || Date.now() < bossFlashUntil) bossFxRaf = requestAnimationFrame(step);
+            else { bossFxRaf = 0; renderBossSprite(); }
+          };
+          bossFxRaf = requestAnimationFrame(step);
+        }
+
+        // Called from the 'update' handler after the boss card text is set.
+        // A drop in the shown boss's count is a hit (white flash + shake);
+        // the shown boss's count hitting 0 is a defeat (pixel poof).
+        // Burnout Boss has no count — its HP is your own health, so passive
+        // decay would make every tick a "hit". It reacts to burnout itself
+        // instead: it strikes (red flash + shake) the moment you burn out,
+        // and bursts when you recover, then respawns as the idle fallback.
+        function updateBossSprite(prevDev, dev) {
+          const shown = getShownBoss(dev);
+          bossSprite = { kind: shown.kind, heads: Math.min(3, Math.max(1, shown.count)), tier: getBossTier(shown.count) };
+          if (prevDev) {
+            const prev = getShownBoss(prevDev);
+            const nowCount = getBossCount(dev, prev.kind);
+            const canvas = document.getElementById('bossSpriteCanvas');
+            if (nowCount === 0) {
+              if (!bossReduceMotion) bossPoof = makeBossPoof(prev.kind, Math.min(3, prev.count));
+            } else if (nowCount !== null && prev.kind === shown.kind && nowCount < prev.count) {
+              bossFlashColor = '#ffffff';
+              bossFlashUntil = Date.now() + BOSS_FLASH_MS;
+              shakeElement(canvas);
+            } else if (prev.kind === 'burnout' && shown.kind === 'burnout') {
+              if (!prevDev.isBurntOut && dev.isBurntOut) {
+                bossFlashColor = '#ff1744';
+                bossFlashUntil = Date.now() + BOSS_STRIKE_MS;
+                shakeElement(canvas);
+              } else if (prevDev.isBurntOut && !dev.isBurntOut && !bossReduceMotion) {
+                bossPoof = makeBossPoof('burnout', 1);
+              }
+            }
+          }
+          if (bossPoof || Date.now() < bossFlashUntil) runBossFx();
+          else renderBossSprite();
+        }
+
+        // Idle loop: flip between the two frames twice a second. Skipped
+        // while the panel is hidden or the user prefers reduced motion.
+        setInterval(() => {
+          if (document.hidden || bossReduceMotion) return;
+          bossSpriteFrame = bossSpriteFrame ? 0 : 1;
+          if (!bossFxRaf) renderBossSprite();
+        }, 500);
 
         // Per-class recolor of the same sprite/scene art (hoodie + glow only —
         // shape and everything else stays identical). Keyed by CLASSES id;

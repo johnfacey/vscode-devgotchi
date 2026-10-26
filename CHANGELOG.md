@@ -4,8 +4,13 @@ All notable changes to the "DevGotchi" extension will be documented in this file
 
 ## [Unreleased]
 
-### Roadmap — ideas being considered, not yet built
-- **Code Smell Boss, function-length mode**: the current boss only counts bloated *files* (300+ lines, free via `TextDocument.lineCount`); flagging individual 200-line *functions* needs real per-language parsing and is a bigger, separate build.
+### Added
+- **🐍 Stale Branch Hydra** — a fourth real-state boss. HP is the count of local branches that are already merged into HEAD or whose tip commit is 30+ days old (current branch, `main`, `master` and remotes excluded). +10 XP per pruned branch; defeat pays +30 XP / +15 ☕ through the weekly Boss Affix. Lowest priority on the boss card. DevGotchi never deletes branches itself — prune with your own git commands.
+- **👾 Boss pixel avatars** — every boss on the boss card (Burnout Boss, Bug Boss, Merge Conflict Kraken, Code Smell Boss, Stale Branch Hydra) now has an animated 16×16 pixel-art sprite in the same style as your character. Idle two-frame loop, a brighter aura at higher HP tiers, a white flash + shake when you deal damage, and a pixel burst on defeat. The Hydra grows a head per stale branch (up to 3). Animation pauses while the panel is hidden and respects reduced-motion settings.
+- **Burnout Boss reactions** — the flaming skull strikes (red flash + shake) the moment you burn out, and bursts apart when you recover. It ignores ordinary health decay, which would otherwise twitch it every 30 seconds.
+- **Typing boss fight uses the pixel Bug Boss** — the mini-game's 👾 emoji is now the animated Bug Boss sprite at 2× size. It flashes on every hit and bursts before the victory screen.
+- **Code Smell Boss, function-length mode** — the Code Smell Boss now also counts functions, methods and constructors over 200 lines in your open files, on top of files over 300 lines. Function boundaries come from each language's own symbol provider (the same data as the Outline view), so it works for any language with an extension and needs no per-language parsing. Breaking up a long function pays +25 XP; the boss is only defeated once both files and functions are clear.
+
 
 ## [2.10.0] - 2026-10-11
 

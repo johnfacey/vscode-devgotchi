@@ -49,11 +49,14 @@ When your health hits zero, **full burnout** kicks in:
 Going to lunch shouldn't tank your stats. If there's no real editor activity (typing, cursor movement, switching files, regaining window focus) for 10 minutes, DevGotchi reads that as AFK — stat decay pauses and your avatar visibly falls asleep instead of draining the whole time you're away from the keyboard. The moment you're back, everything resumes normally.
 
 ### 👾 Boss Fights
-The panel's boss card isn't just decorative — it becomes a **real boss** tied to your actual repo/editor state, not a simulated fight. Three bosses share the card, in priority order (highest shown when more than one is active):
+The panel's boss card isn't just decorative — it becomes a **real boss** tied to your actual repo/editor state, not a simulated fight. Four bosses share the card, in priority order (highest shown when more than one is active):
 
 1. **🐙 Merge Conflict Kraken** — HP is the real count of files with unresolved git merge conflicts (Conflict Tentacle → Merge Kraken → Rebase Leviathan → Git Cthulhu). A live conflict blocks work, so it always takes priority.
 2. **🐛 Bug Boss** — HP is tied 1:1 to your actual active lint/build error count (Syntax Wraith → NullPointerDemon → StackOverflow Behemoth → Overwhelmulus). Fixing an error does real damage; the soundtrack itself intensifies as this one grows — see **🎵 Room Music** below.
-3. **🧟 Code Smell Boss** — HP is the count of currently-open files over 300 lines (Spaghetti Sprite → Code Smell Ooze → Legacy Behemoth → Technical Debt Titan). Only scans files you actually have open, not the whole repo. The lowest-priority boss — it only shows once nothing more urgent is going on, matching "the chore everyone postpones."
+3. **🧟 Code Smell Boss** — HP is the count of currently-open files over 300 lines plus functions/methods over 200 lines in those files (Spaghetti Sprite → Code Smell Ooze → Legacy Behemoth → Technical Debt Titan). Function lengths come from your language's own Outline data, so any language with an extension works. Only scans files you actually have open, not the whole repo. The lowest-priority boss — it only shows once nothing more urgent is going on, matching "the chore everyone postpones."
+4. **🐍 Stale Branch Hydra** — HP is the count of local branches that are already merged into your current HEAD or haven't been committed to in 30+ days (Branch Hatchling → Stale Branch Hydra → Many-Headed Monorepo → Hydra of a Thousand Refs). Your current branch, `main`, `master` and remote branches never count. DevGotchi never deletes anything — prune with `git branch -d` yourself. Branch hygiene never blocks work, so it only appears when no other boss is active.
+
+Each boss has its own animated pixel-art avatar on the card — it flashes when you land a hit and bursts apart on defeat (the Hydra literally grows a head per stale branch, up to 3).
 
 Clearing any of them to 0 **defeats the boss** for a bonus (+30 XP, +15 ☕), and counts toward your lifetime bosses-slain total (see **🎁 Year in Code Wrapped**). No active boss? The card reverts to the standard health-based Burnout Boss.
 
@@ -337,10 +340,7 @@ See your teammates' progress without any server, accounts, or DevGotchi backend 
 
 ## 🗺️ Roadmap
 
-Ideas being considered, not yet built:
-- **Code Smell Boss, function-length mode** — the current boss only counts bloated *files* (300+ lines); flagging individual bloated *functions* needs real per-language parsing and is a bigger, separate build.
-
-Have an idea? Use `DevGotchi: Send Feedback` — that's what it's there for.
+Nothing queued right now. Have an idea? Use `DevGotchi: Send Feedback` — that's what it's there for.
 
 ---
 
